@@ -1,0 +1,95 @@
+# Bridge configuration for Invitation.
+# Routes and auth schema drive bridge code generation.
+# Remove a route to stop generating its handler — write your own in routes.go.
+
+entity: Invitation
+repo: rebac/invitations
+domain: rebac
+
+auth_relations:
+  - "owner(user, service_account)"
+
+auth_permissions:
+  - "list(owner)"
+  - "create(authenticated)"
+  - "read(owner)"
+  - "update(owner)"
+  - "delete(owner)"
+  - "manage(owner)"
+
+routes:
+  - func: List
+    path: /invitations
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          pattern: prefilter
+          permission: read
+
+  - func: Get
+    path: /invitations/{invitation_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: read
+          param: invitation_id
+
+  - func: Create
+    path: /invitations
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+    auth_create:
+      - "invitation:{invitation_id}#owner@{=subject}"
+
+  - func: Update
+    path: /invitations/{invitation_id}
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: invitation_id
+
+  - func: SoftDelete
+    method: PUT
+    path: /invitations/{invitation_id}/delete
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: delete
+          param: invitation_id
+
+  - func: Archive
+    method: PUT
+    path: /invitations/{invitation_id}/archive
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: invitation_id
+
+  - func: Restore
+    method: PUT
+    path: /invitations/{invitation_id}/restore
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: invitation_id
+
+  - func: Delete
+    path: /invitations/{invitation_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: delete
+          param: invitation_id

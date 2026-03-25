@@ -1,0 +1,65 @@
+# Bridge configuration for VerificationCode.
+# Routes and auth schema drive bridge code generation.
+# Remove a route to stop generating its handler — write your own in routes.go.
+
+entity: VerificationCode
+repo: auth/verificationcodes
+domain: auth
+
+auth_relations:
+  - "owner(user, service_account)"
+
+auth_permissions:
+  - "list(owner)"
+  - "create(authenticated)"
+  - "read(owner)"
+  - "update(owner)"
+  - "delete(owner)"
+  - "manage(owner)"
+
+routes:
+  - func: List
+    path: /verification-codes
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          pattern: prefilter
+          permission: read
+
+  - func: Get
+    path: /verification-codes/{code_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: read
+          param: code_id
+
+  - func: Create
+    path: /verification-codes
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+    auth_create:
+      - "verification_code:{code_id}#owner@{=subject}"
+
+  - func: Update
+    path: /verification-codes/{code_id}
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: code_id
+
+  - func: Delete
+    path: /verification-codes/{code_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: delete
+          param: code_id

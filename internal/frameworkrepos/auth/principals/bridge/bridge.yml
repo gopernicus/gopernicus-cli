@@ -1,0 +1,65 @@
+# Bridge configuration for Principal.
+# Routes and auth schema drive bridge code generation.
+# Remove a route to stop generating its handler — write your own in routes.go.
+
+entity: Principal
+repo: auth/principals
+domain: auth
+
+auth_relations:
+  - "owner(user, service_account)"
+
+auth_permissions:
+  - "list(owner)"
+  - "create(authenticated)"
+  - "read(owner)"
+  - "update(owner)"
+  - "delete(owner)"
+  - "manage(owner)"
+
+routes:
+  - func: List
+    path: /principals
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          pattern: prefilter
+          permission: read
+
+  - func: Get
+    path: /principals/{principal_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: read
+          param: principal_id
+
+  - func: Create
+    path: /principals
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+    auth_create:
+      - "principal:{principal_id}#owner@{=subject}"
+
+  - func: Update
+    path: /principals/{principal_id}
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: principal_id
+
+  - func: Delete
+    path: /principals/{principal_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: delete
+          param: principal_id

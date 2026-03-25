@@ -1,0 +1,22 @@
+node_modules
+.DS_Store
+
+
+
+# Test related files
+coverage.out
+coverage.html
+*.test
+*.prof
+*.cov
+*.out
+tmp
+
+# Benchmark results
+*.bench
+
+# secrets and env
+secrets.txt
+*.env
+.env
+.env.docker

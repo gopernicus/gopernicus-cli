@@ -1,0 +1,72 @@
+# Bridge configuration for Session.
+# Routes and auth schema drive bridge code generation.
+# Remove a route to stop generating its handler — write your own in routes.go.
+
+entity: Session
+repo: auth/sessions
+domain: auth
+
+auth_relations:
+  - "user(user)"
+  - "owner(user, service_account)"
+
+auth_permissions:
+  - "list(user->list)"
+  - "create(user->manage)"
+  - "read(owner|user->read)"
+  - "update(owner|user->manage)"
+  - "delete(owner|user->manage)"
+  - "manage(owner|user->manage)"
+
+routes:
+  - func: List
+    path: /users/{parent_user_id}/sessions
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          pattern: prefilter
+          permission: read
+
+  - func: Get
+    path: /users/{parent_user_id}/sessions/{session_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: read
+          param: session_id
+
+  - func: Create
+    path: /users/{parent_user_id}/sessions
+    params_to_input:
+      - parent_user_id
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: create
+          param: parent_user_id
+    auth_create:
+      - "session:{session_id}#owner@{=subject}"
+      - "session:{session_id}#user@user:{parent_user_id}"
+
+  - func: Update
+    path: /users/{parent_user_id}/sessions/{session_id}
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: session_id
+
+  - func: Delete
+    path: /users/{parent_user_id}/sessions/{session_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: delete
+          param: session_id

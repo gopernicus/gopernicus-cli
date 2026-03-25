@@ -1,0 +1,88 @@
+# Bridge configuration for ServiceAccount.
+# Routes and auth schema drive bridge code generation.
+# Remove a route to stop generating its handler — write your own in routes.go.
+
+entity: ServiceAccount
+repo: auth/serviceaccounts
+domain: auth
+
+auth_relations:
+  - "owner(user, service_account)"
+
+auth_permissions:
+  - "list(owner)"
+  - "create(authenticated)"
+  - "read(owner)"
+  - "update(owner)"
+  - "delete(owner)"
+  - "manage(owner)"
+
+routes:
+  - func: List
+    path: /service-accounts
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          pattern: prefilter
+          permission: read
+
+  - func: Get
+    path: /service-accounts/{service_account_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: read
+          param: service_account_id
+
+  # Create is custom — see routes.go and http.go for the custom handler.
+
+  - func: Update
+    path: /service-accounts/{service_account_id}
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: service_account_id
+
+  - func: SoftDelete
+    method: PUT
+    path: /service-accounts/{service_account_id}/delete
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: delete
+          param: service_account_id
+
+  - func: Archive
+    method: PUT
+    path: /service-accounts/{service_account_id}/archive
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: service_account_id
+
+  - func: Restore
+    method: PUT
+    path: /service-accounts/{service_account_id}/restore
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: service_account_id
+
+  - func: Delete
+    path: /service-accounts/{service_account_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: delete
+          param: service_account_id

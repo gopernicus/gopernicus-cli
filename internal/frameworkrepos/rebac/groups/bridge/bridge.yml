@@ -1,0 +1,95 @@
+# Bridge configuration for Group.
+# Routes and auth schema drive bridge code generation.
+# Remove a route to stop generating its handler — write your own in routes.go.
+
+entity: Group
+repo: rebac/groups
+domain: rebac
+
+auth_relations:
+  - "owner(user, service_account)"
+
+auth_permissions:
+  - "list(owner)"
+  - "create(authenticated)"
+  - "read(owner)"
+  - "update(owner)"
+  - "delete(owner)"
+  - "manage(owner)"
+
+routes:
+  - func: List
+    path: /groups
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          pattern: prefilter
+          permission: read
+
+  - func: Get
+    path: /groups/{group_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: read
+          param: group_id
+
+  - func: Create
+    path: /groups
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+    auth_create:
+      - "group:{group_id}#owner@{=subject}"
+
+  - func: Update
+    path: /groups/{group_id}
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: group_id
+
+  - func: SoftDelete
+    method: PUT
+    path: /groups/{group_id}/delete
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: delete
+          param: group_id
+
+  - func: Archive
+    method: PUT
+    path: /groups/{group_id}/archive
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: group_id
+
+  - func: Restore
+    method: PUT
+    path: /groups/{group_id}/restore
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: group_id
+
+  - func: Delete
+    path: /groups/{group_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: delete
+          param: group_id

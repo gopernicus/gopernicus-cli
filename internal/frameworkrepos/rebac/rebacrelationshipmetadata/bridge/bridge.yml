@@ -1,0 +1,65 @@
+# Bridge configuration for RebacRelationshipMetadata.
+# Routes and auth schema drive bridge code generation.
+# Remove a route to stop generating its handler — write your own in routes.go.
+
+entity: RebacRelationshipMetadata
+repo: rebac/rebacrelationshipmetadata
+domain: rebac
+
+auth_relations:
+  - "owner(user, service_account)"
+
+auth_permissions:
+  - "list(owner)"
+  - "create(authenticated)"
+  - "read(owner)"
+  - "update(owner)"
+  - "delete(owner)"
+  - "manage(owner)"
+
+routes:
+  - func: List
+    path: /rebac-relationship-metadata
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          pattern: prefilter
+          permission: read
+
+  - func: Get
+    path: /rebac-relationship-metadata/{relationship_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: read
+          param: relationship_id
+
+  - func: Create
+    path: /rebac-relationship-metadata
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+    auth_create:
+      - "rebac_relationship_metadata:{relationship_id}#owner@{=subject}"
+
+  - func: Update
+    path: /rebac-relationship-metadata/{relationship_id}
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: relationship_id
+
+  - func: Delete
+    path: /rebac-relationship-metadata/{relationship_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: delete
+          param: relationship_id

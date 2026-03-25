@@ -1,0 +1,31 @@
+// This file is created once by gopernicus and will NOT be overwritten.
+// Customize entity types by adding methods or fields.
+
+package serviceaccounts
+
+import (
+	"github.com/gopernicus/gopernicus/infrastructure/events"
+)
+
+// ServiceAccount is the domain entity for a service_account.
+type ServiceAccount struct{ GeneratedServiceAccount }
+
+// CreateServiceAccount is the input for creating a service_account.
+// Defined manually because service account creation is not generated — it requires
+// a transactional principal insert handled by the custom store.
+type CreateServiceAccount struct {
+	ServiceAccountID   string  `json:"service_account_id,omitempty"`
+	Name               string  `json:"name,omitempty"`
+	Description        *string `json:"description,omitempty"`
+	CreatorPrincipalID string  `json:"creator_principal_id,omitempty"`
+	RecordState        string  `json:"record_state,omitempty"`
+}
+
+// UpdateServiceAccount is the input for updating a service_account.
+type UpdateServiceAccount struct{ GeneratedUpdateServiceAccount }
+
+// ServiceAccountCreatedEvent is emitted when a new service account is created.
+type ServiceAccountCreatedEvent struct {
+	events.BaseEvent
+	ServiceAccount ServiceAccount `json:"service_account"`
+}

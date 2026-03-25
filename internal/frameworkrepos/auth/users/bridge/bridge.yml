@@ -1,0 +1,88 @@
+# Bridge configuration for User.
+# Routes and auth schema drive bridge code generation.
+# Remove a route to stop generating its handler — write your own in routes.go.
+
+entity: User
+repo: auth/users
+domain: auth
+
+auth_relations:
+  - "owner(user, service_account)"
+
+auth_permissions:
+  - "list(owner)"
+  - "create(authenticated)"
+  - "read(owner)"
+  - "update(owner)"
+  - "delete(owner)"
+  - "manage(owner)"
+
+routes:
+  - func: List
+    path: /users
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          pattern: prefilter
+          permission: read
+
+  - func: Get
+    path: /users/{user_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: read
+          param: user_id
+
+  # Create is custom — see routes.go and http.go for the custom handler.
+
+  - func: Update
+    path: /users/{user_id}
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: user_id
+
+  - func: SoftDelete
+    method: PUT
+    path: /users/{user_id}/delete
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: delete
+          param: user_id
+
+  - func: Archive
+    method: PUT
+    path: /users/{user_id}/archive
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: user_id
+
+  - func: Restore
+    method: PUT
+    path: /users/{user_id}/restore
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: user_id
+
+  - func: Delete
+    path: /users/{user_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: delete
+          param: user_id

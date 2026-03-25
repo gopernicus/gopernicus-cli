@@ -1,0 +1,112 @@
+# Bridge configuration for Tenant.
+# Routes and auth schema drive bridge code generation.
+# Remove a route to stop generating its handler — write your own in routes.go.
+
+entity: Tenant
+repo: tenancy/tenants
+domain: tenancy
+
+auth_relations:
+  - "owner(user, service_account)"
+  - "manager(user, service_account)"
+  - "member(user, service_account)"
+
+auth_permissions:
+  - "list(owner|manager|member)"
+  - "create(authenticated)"
+  - "read(owner|manager|member)"
+  - "update(owner|manager)"
+  - "delete(owner)"
+  - "manage(owner|manager)"
+  - "participate(owner|manager|member)"
+
+routes:
+  - func: List
+    path: /tenants
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          pattern: prefilter
+          permission: read
+
+  - func: Get
+    path: /tenants/{tenant_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: read
+          param: tenant_id
+
+  - func: GetBySlug
+    path: /tenants/by/slug/{slug}
+    middleware:
+      - authenticate: any
+      - unique_to_id:
+          resolver: GetIDBySlug
+          param: slug
+          target_param: tenant_id
+          id_field: TenantID
+      - rate_limit
+      - authorize:
+          permission: read
+          param: tenant_id
+
+  - func: Create
+    path: /tenants
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+    auth_create:
+      - "tenant:{tenant_id}#owner@{=subject}"
+
+  - func: Update
+    path: /tenants/{tenant_id}
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: tenant_id
+
+  - func: SoftDelete
+    method: PUT
+    path: /tenants/{tenant_id}/delete
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: delete
+          param: tenant_id
+
+  - func: Archive
+    method: PUT
+    path: /tenants/{tenant_id}/archive
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: tenant_id
+
+  - func: Restore
+    method: PUT
+    path: /tenants/{tenant_id}/restore
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: tenant_id
+
+  - func: Delete
+    path: /tenants/{tenant_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: delete
+          param: tenant_id

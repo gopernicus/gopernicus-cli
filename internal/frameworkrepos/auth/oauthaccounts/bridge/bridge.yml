@@ -1,0 +1,72 @@
+# Bridge configuration for OauthAccount.
+# Routes and auth schema drive bridge code generation.
+# Remove a route to stop generating its handler — write your own in routes.go.
+
+entity: OauthAccount
+repo: auth/oauthaccounts
+domain: auth
+
+auth_relations:
+  - "user(user)"
+  - "owner(user, service_account)"
+
+auth_permissions:
+  - "list(user->list)"
+  - "create(user->manage)"
+  - "read(owner|user->read)"
+  - "update(owner|user->manage)"
+  - "delete(owner|user->manage)"
+  - "manage(owner|user->manage)"
+
+routes:
+  - func: List
+    path: /users/{parent_user_id}/oauth-accounts
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          pattern: prefilter
+          permission: read
+
+  - func: Get
+    path: /users/{parent_user_id}/oauth-accounts/{oauth_account_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: read
+          param: oauth_account_id
+
+  - func: Create
+    path: /users/{parent_user_id}/oauth-accounts
+    params_to_input:
+      - parent_user_id
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: create
+          param: parent_user_id
+    auth_create:
+      - "oauth_account:{oauth_account_id}#owner@{=subject}"
+      - "oauth_account:{oauth_account_id}#user@user:{parent_user_id}"
+
+  - func: Update
+    path: /users/{parent_user_id}/oauth-accounts/{oauth_account_id}
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: oauth_account_id
+
+  - func: Delete
+    path: /users/{parent_user_id}/oauth-accounts/{oauth_account_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: delete
+          param: oauth_account_id

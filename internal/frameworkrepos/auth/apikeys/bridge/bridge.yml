@@ -1,0 +1,102 @@
+# Bridge configuration for APIKey.
+# Routes and auth schema drive bridge code generation.
+# Remove a route to stop generating its handler — write your own in routes.go.
+
+entity: APIKey
+repo: auth/apikeys
+domain: auth
+
+auth_relations:
+  - "service_account(service_account)"
+  - "owner(user, service_account)"
+
+auth_permissions:
+  - "list(service_account->list)"
+  - "create(service_account->manage)"
+  - "read(owner|service_account->read)"
+  - "update(owner|service_account->manage)"
+  - "delete(owner|service_account->manage)"
+  - "manage(owner|service_account->manage)"
+
+routes:
+  - func: List
+    path: /service-accounts/{parent_service_account_id}/api-keys
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          pattern: prefilter
+          permission: read
+
+  - func: Get
+    path: /service-accounts/{parent_service_account_id}/api-keys/{api_key_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: read
+          param: api_key_id
+
+  - func: Create
+    path: /service-accounts/{parent_service_account_id}/api-keys
+    params_to_input:
+      - parent_service_account_id
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: create
+          param: parent_service_account_id
+    auth_create:
+      - "api_key:{api_key_id}#owner@{=subject}"
+      - "api_key:{api_key_id}#service_account@service_account:{parent_service_account_id}"
+
+  - func: Update
+    path: /service-accounts/{parent_service_account_id}/api-keys/{api_key_id}
+    middleware:
+      - max_body_size: 1048576
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: api_key_id
+
+  - func: SoftDelete
+    method: PUT
+    path: /service-accounts/{parent_service_account_id}/api-keys/{api_key_id}/delete
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: delete
+          param: api_key_id
+
+  - func: Archive
+    method: PUT
+    path: /service-accounts/{parent_service_account_id}/api-keys/{api_key_id}/archive
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: api_key_id
+
+  - func: Restore
+    method: PUT
+    path: /service-accounts/{parent_service_account_id}/api-keys/{api_key_id}/restore
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: update
+          param: api_key_id
+
+  - func: Delete
+    path: /service-accounts/{parent_service_account_id}/api-keys/{api_key_id}
+    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          permission: delete
+          param: api_key_id
