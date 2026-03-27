@@ -75,7 +75,7 @@ func BuildE2ETestData(resolved *ResolvedFile, modulePath string) (*E2ETestData, 
 		PKGoName:      resolved.PKGoName,
 		ModulePath:    modulePath,
 		FrameworkPath: goperniculusFrameworkPath,
-		FixtureImport: modulePath + "/core/testing/fixtures",
+		FixtureImport: modulePath + "/workshop/testing/fixtures",
 	}
 
 	methods, err := buildRepoMethods(resolved)

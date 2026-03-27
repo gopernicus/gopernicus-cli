@@ -202,7 +202,7 @@ func Run(cfg Config) error {
 
 	// Generate test fixtures (single package across all domains for cross-domain FK resolution).
 	if len(allFixtureEntities) > 0 {
-		fixtureDir := filepath.Join(cfg.ProjectRoot, "core", "testing", "fixtures")
+		fixtureDir := filepath.Join(cfg.ProjectRoot, "workshop", "testing", "fixtures")
 		data := FixtureTemplateData{
 			ModulePath:    modulePath,
 			FrameworkPath: goperniculusFrameworkPath,
@@ -216,7 +216,7 @@ func Run(cfg Config) error {
 
 	// Generate E2E tests (single package, one test file per entity).
 	if len(allE2ETestData) > 0 {
-		e2eDir := filepath.Join(cfg.ProjectRoot, "testing", "e2e")
+		e2eDir := filepath.Join(cfg.ProjectRoot, "workshop", "testing", "e2e")
 		fmt.Printf("\n  e2e/ (E2E tests)\n")
 
 		// Generate bootstrap setup file once.

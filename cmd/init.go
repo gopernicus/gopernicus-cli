@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gopernicus/gopernicus-cli/internal/fwsource"
 	"github.com/gopernicus/gopernicus-cli/internal/generators"
 	"github.com/gopernicus/gopernicus-cli/internal/goversion"
 	"github.com/gopernicus/gopernicus-cli/internal/manifest"
@@ -29,8 +30,9 @@ Examples:
   gopernicus init myapp --module github.com/acme/myapp
   gopernicus init myapp --no-interactive
   gopernicus init myapp --no-interactive --features=authentication,authorization
-  gopernicus init myapp --no-interactive --features=none`,
-		Usage: "gopernicus init <project-name> [--module <path>] [--no-interactive] [--features <list>]",
+  gopernicus init myapp --no-interactive --features=none
+  gopernicus init myapp --framework-version v0.1.0`,
+		Usage: "gopernicus init <project-name> [--module <path>] [--framework-version <version>] [--no-interactive] [--features <list>]",
 		Run:   runInit,
 	})
 }
@@ -102,7 +104,7 @@ func runInit(_ context.Context, args []string) error {
 
 	// Copy feature assets (migrations, repos, bridges) from gopernicus source.
 	if opts.features.any() {
-		if err := copyFeatureAssets(target, opts.modulePath, opts.features); err != nil {
+		if err := copyFeatureAssets(target, opts.modulePath, opts.frameworkVersion, opts.features); err != nil {
 			return err
 		}
 	}
@@ -121,8 +123,12 @@ func runInit(_ context.Context, args []string) error {
 			return fmt.Errorf("go mod edit -replace: %w", err)
 		}
 	} else {
+		fwRef := "github.com/gopernicus/gopernicus@latest"
+		if opts.frameworkVersion != "" {
+			fwRef = "github.com/gopernicus/gopernicus@" + opts.frameworkVersion
+		}
 		fmt.Printf("  → adding gopernicus framework\n")
-		goGet := exec.Command("go", "get", "github.com/gopernicus/gopernicus@latest")
+		goGet := exec.Command("go", "get", fwRef)
 		goGet.Dir = target
 		goGet.Stdout = os.Stdout
 		goGet.Stderr = os.Stderr
@@ -152,13 +158,14 @@ func runInit(_ context.Context, args []string) error {
 
 // initOpts holds all inputs for the init command.
 type initOpts struct {
-	projectName   string
-	orgHint       string // extracted from "org/name" format (e.g. "jrazmi" from "jrazmi/foo")
-	modulePath    string
-	noInteractive bool
-	featuresFlag  string // raw --features value; "" means use default (all)
-	features      featureSelection
-	infra         infrastructureSelection
+	projectName      string
+	orgHint          string // extracted from "org/name" format (e.g. "jrazmi" from "jrazmi/foo")
+	modulePath       string
+	frameworkVersion string // gopernicus framework version (e.g. "v0.1.0"); "" means latest
+	noInteractive    bool
+	featuresFlag     string // raw --features value; "" means use default (all)
+	features         featureSelection
+	infra            infrastructureSelection
 }
 
 func parseInitArgs(args []string) (initOpts, error) {
@@ -181,6 +188,14 @@ func parseInitArgs(args []string) (initOpts, error) {
 			}
 			i++
 			opts.featuresFlag = args[i]
+		case strings.HasPrefix(args[i], "--framework-version="):
+			opts.frameworkVersion = strings.TrimPrefix(args[i], "--framework-version=")
+		case args[i] == "--framework-version":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("--framework-version requires a value")
+			}
+			i++
+			opts.frameworkVersion = args[i]
 		case strings.HasPrefix(args[i], "--"):
 			return opts, fmt.Errorf("unknown flag %q", args[i])
 		default:
@@ -510,6 +525,9 @@ func scaffoldProject(opts initOpts) (string, error) {
 
 	// Build the manifest with features and domain mappings.
 	m := manifest.NewWithProject(opts.projectName)
+	if opts.frameworkVersion != "" {
+		m.GopernicusVersion = opts.frameworkVersion
+	}
 	applyFeatureSelection(m, opts.features)
 
 	steps := []struct {
@@ -539,7 +557,11 @@ func scaffoldProject(opts initOpts) (string, error) {
 				"core/cases",
 				"bridge/repositories",
 				"bridge/cases",
+				"infrastructure",
+				"sdk",
 				"workshop/dev",
+				"workshop/testing/fixtures",
+				"workshop/testing/e2e",
 			}
 			for _, d := range dirs {
 				if err := os.MkdirAll(filepath.Join(target, d), 0755); err != nil {
@@ -671,11 +693,10 @@ func applyFeatureSelection(m *manifest.Manifest, features featureSelection) {
 // repositories from the gopernicus framework source into the new project.
 // Go files have their import paths rewritten from the gopernicus module to
 // the user's module path.
-func copyFeatureAssets(target, modulePath string, features featureSelection) error {
-	source := gopernicusSourceDir()
-	if source == "" {
-		fmt.Printf("  note: skipping feature asset copy (set GOPERNICUS_DEV_SOURCE to enable)\n")
-		return nil
+func copyFeatureAssets(target, modulePath, fwVersion string, features featureSelection) error {
+	source, err := gopernicusSourceDir(fwVersion)
+	if err != nil {
+		return fmt.Errorf("resolving gopernicus source: %w", err)
 	}
 
 	const gopernicusModule = "github.com/gopernicus/gopernicus"
@@ -808,10 +829,12 @@ func copyFeatureAssets(target, modulePath string, features featureSelection) err
 	return nil
 }
 
-// gopernicusSourceDir returns the path to the gopernicus framework source,
-// or "" if not available.
-func gopernicusSourceDir() string {
-	return os.Getenv("GOPERNICUS_DEV_SOURCE")
+// gopernicusSourceDir returns the path to the gopernicus framework source.
+// Uses GOPERNICUS_DEV_SOURCE if set, otherwise resolves from the Go module
+// cache via `go mod download -json`. When version is non-empty it fetches
+// that specific version; otherwise it fetches @latest.
+func gopernicusSourceDir(version string) (string, error) {
+	return fwsource.ResolveDirVersion(version)
 }
 
 // copyDirRecursive copies all files and subdirectories from src to dst.

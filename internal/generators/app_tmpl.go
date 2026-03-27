@@ -828,8 +828,10 @@ volumes:
 
 // makefileTemplate produces a Makefile with standard development targets.
 const makefileTemplate = `BINARY    := {{.ProjectName}}
-GOPERNICUS ?= gopernicus
 COMPOSE   := docker compose -f workshop/dev/docker-compose.yml
+VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+IMAGE     := {{.ProjectName}}
+IMAGE_TAG := $(IMAGE):$(VERSION)
 
 # ── Application ──────────────────────────────────────────────────────────────
 
@@ -845,6 +847,10 @@ run: ## Start the application server
 build: ## Build the server binary
 	go build -o bin/$(BINARY) ./app/server
 
+.PHONY: clean
+clean: ## Remove build artifacts
+	rm -rf bin/
+
 .PHONY: fmt
 fmt: ## Format Go source files
 	go fmt ./...
@@ -852,6 +858,37 @@ fmt: ## Format Go source files
 .PHONY: tidy
 tidy: ## Tidy and verify Go modules
 	go mod tidy && go mod verify
+
+# ── Docker Build ─────────────────────────────────────────────────────────────
+
+.PHONY: build-docker
+build-docker: ## Build the Docker image
+	docker build \
+		-f workshop/docker/dockerfile.{{.ProjectName}} \
+		-t $(IMAGE_TAG) \
+		-t $(IMAGE):latest \
+		--build-arg BUILD_REF=$(VERSION) \
+		--build-arg BUILD_DATE=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ") \
+		.
+
+.PHONY: run-docker
+run-docker: ## Run the API in a Docker container
+	@docker stop $(BINARY) 2>/dev/null || true
+	@docker rm $(BINARY) 2>/dev/null || true
+	docker run -d \
+		--name $(BINARY) \
+		-p 3000:3000 \
+		--env-file .env \
+		$(IMAGE):latest
+
+.PHONY: stop-docker
+stop-docker: ## Stop and remove the Docker container
+	@docker stop $(BINARY) 2>/dev/null || true
+	@docker rm $(BINARY) 2>/dev/null || true
+
+.PHONY: logs-docker
+logs-docker: ## Tail the Docker container logs
+	docker logs -f $(BINARY)
 
 # ── Development Infrastructure ───────────────────────────────────────────────
 
@@ -880,37 +917,6 @@ dev-reset: ## Nuclear reset: stop, wipe volumes, restart
 dev-psql: ## Open a psql shell in the dev database
 	$(COMPOSE) exec postgres psql -U postgres -d {{.ProjectName}}
 
-# ── Database ─────────────────────────────────────────────────────────────────
-
-.PHONY: migrate
-migrate: ## Apply pending database migrations
-	$(GOPERNICUS) db migrate
-
-.PHONY: migrate-new
-migrate-new: ## Create a new migration file (usage: make migrate-new name=add_foo)
-	$(GOPERNICUS) db create $(name)
-
-.PHONY: migrate-status
-migrate-status: ## Show migration status
-	$(GOPERNICUS) db status
-
-.PHONY: reflect
-reflect: ## Reflect database schema to JSON for code generation
-	$(GOPERNICUS) db reflect
-
-# ── Code Generation ───────────────────────────────────────────────────────────
-
-.PHONY: boot
-boot: ## Bootstrap repository stubs for all domains
-	$(GOPERNICUS) boot repos
-
-.PHONY: generate
-generate: ## Generate repository and bridge code from queries.sql
-	$(GOPERNICUS) generate
-
-.PHONY: workflow
-workflow: migrate reflect generate ## Full generation workflow: migrate → reflect → generate
-
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 .PHONY: test
@@ -923,7 +929,7 @@ test-integration: ## Run integration tests (requires running DB)
 
 .PHONY: test-e2e
 test-e2e: ## Run end-to-end tests (requires running server)
-	go test -tags=e2e ./...
+	go test -tags=e2e ./workshop/testing/e2e/...
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 
@@ -932,6 +938,147 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 
 .DEFAULT_GOAL := help
+`
+
+// documentationREADMETemplate produces the workshop/documentation/README.md index.
+const documentationREADMETemplate = `# {{.ProjectName}} Documentation
+
+Project documentation for {{.ProjectName}}, built with [gopernicus](https://github.com/gopernicus/gopernicus).
+
+## Architecture
+
+- [Overview](architecture/overview.md) — System architecture and layer responsibilities
+- [Design Philosophy](architecture/design-philosophy.md) — Principles and trade-offs
+
+## Guides
+
+- [Adding a New Entity](guides/adding-new-entity.md) — From SQL table to full CRUD
+- [Adding a Use Case](guides/adding-use-case.md) — Complex operations beyond CRUD
+- [Adding Auth to an Entity](guides/adding-auth-to-entity.md) — ReBAC authorization setup
+
+## Code Generation
+
+- [Query Annotations](generators/query-annotations.md) — @func, @filter, @order, @fields, etc.
+- [bridge.yml Reference](generators/bridge-yml.md) — Routes, middleware, auth schema
+- [Generated File Map](generators/generated-file-map.md) — Which files are generated vs bootstrap
+
+## Infrastructure
+
+- [Database](infrastructure/database.md) — PostgreSQL, migrations, transactions
+- [Events](infrastructure/events.md) — Domain events and the outbox pattern
+- [Caching](infrastructure/caching.md) — Cache-aside with invalidation
+
+## Deployment
+
+- [Docker](deployment/docker.md) — Building and running containers
+- [Environment Variables](deployment/environment.md) — Configuration reference
+`
+
+// documentationArchOverviewTemplate produces the architecture overview stub.
+const documentationArchOverviewTemplate = `# Architecture Overview
+
+{{.ProjectName}} follows a hexagonal (ports & adapters) architecture generated by gopernicus.
+
+## Layers
+
+| Layer | Location | Responsibility |
+|-------|----------|----------------|
+| App | ` + "`app/server/`" + ` | Server bootstrap, dependency wiring, configuration |
+| Bridge | ` + "`bridge/`" + ` | HTTP handlers, request/response mapping, middleware |
+| Core | ` + "`core/`" + ` | Domain logic: repositories, cases, events |
+| Infrastructure | ` + "`(gopernicus module)`" + ` | Database, cache, email, storage adapters |
+| SDK | ` + "`(gopernicus module)`" + ` | Shared utilities: errors, validation, web framework |
+
+## Data Flow
+
+` + "```" + `
+HTTP Request
+  → Bridge (parse, validate, authenticate, authorize)
+    → Core Repository or Case (business logic)
+      → Store (SQL execution via pgx)
+    ← Domain types returned
+  ← Bridge (serialize response)
+HTTP Response
+` + "```" + `
+
+## Key Conventions
+
+- **Accept interfaces, return structs** — dependency injection at every boundary
+- **queries.sql** is the source of truth for data access; **bridge.yml** for HTTP config
+- **generated.go** files are always overwritten; all other files are yours to customize
+- **Storer interface** in repository.go uses markers for regeneration; custom methods go above the markers
+`
+
+// documentationDeployDockerTemplate produces the deployment/docker.md stub.
+const documentationDeployDockerTemplate = `# Docker
+
+## Building
+
+` + "```bash" + `
+make build-docker
+` + "```" + `
+
+This builds a multi-stage Docker image from ` + "`workshop/docker/dockerfile.{{.ProjectName}}`" + `.
+
+- **Stage 1**: Compiles the Go binary with ` + "`CGO_ENABLED=0`" + ` for a static binary
+- **Stage 2**: Copies the binary into an Alpine runtime image with a non-root user
+
+## Running
+
+` + "```bash" + `
+make run-docker      # Start container (reads .env for config)
+make stop-docker     # Stop and remove container
+make logs-docker     # Tail container logs
+` + "```" + `
+
+The container exposes port 3000 and includes a healthcheck on ` + "`/healthz`" + `.
+
+## Environment Variables
+
+Pass environment variables via ` + "`--env-file .env`" + ` or individual ` + "`-e`" + ` flags.
+See ` + "`.env.example`" + ` for the full list of configuration options.
+`
+
+// dockerfileTemplate produces a multi-stage Dockerfile for production builds.
+// Written to workshop/docker/dockerfile.<project-name>.
+const dockerfileTemplate = `# Production Dockerfile for {{.ProjectName}}
+
+# ============================================
+# Stage 1: Build Go Binary
+# ============================================
+FROM golang:1.26 AS go-build
+ENV CGO_ENABLED=0
+ARG BUILD_REF
+
+COPY . /applications
+WORKDIR /applications/app/server
+RUN go build -ldflags "-X main.build=${BUILD_REF}"
+
+# ============================================
+# Stage 2: Production Runtime
+# ============================================
+FROM alpine:3.21 AS runner
+ARG BUILD_DATE
+ARG BUILD_REF
+
+RUN apk --no-cache add ca-certificates
+
+RUN addgroup -g 1000 -S appsuser && \
+    adduser -u 1000 -h /applications -G appsuser -S appsuser
+
+WORKDIR /applications
+
+COPY --from=go-build --chown=appsuser:appsuser /applications/app/server/server /applications/server
+
+USER appsuser
+
+EXPOSE 3000
+
+CMD ["./server"]
+
+LABEL org.opencontainers.image.created="${BUILD_DATE}" \
+    org.opencontainers.image.title="{{.ProjectName}}" \
+    org.opencontainers.image.revision="${BUILD_REF}"
 `
 
 // emailsTemplate produces app/server/emails/emails.go — the app-level email

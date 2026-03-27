@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gopernicus/gopernicus-cli/internal/frameworkrepos"
+	"github.com/gopernicus/gopernicus-cli/internal/fwsource"
 	"github.com/gopernicus/gopernicus-cli/internal/generators"
 	"github.com/gopernicus/gopernicus-cli/internal/manifest"
 	"github.com/gopernicus/gopernicus-cli/internal/project"
@@ -130,6 +130,9 @@ func runNewRepo(_ context.Context, args []string) error {
 		return err
 	}
 
+	// Resolve framework source for pre-baked bootstrap files.
+	fwSourceDir, _ := fwsource.ResolveDir() // empty on error; falls back to generic scaffold
+
 	// Try to find the table in the reflected schema. If found, scaffold
 	// full CRUD queries. If not, scaffold a custom repo with a stub.
 	table, _, err := findTable(root, m, dbName, tableName, entityName)
@@ -138,12 +141,12 @@ func runNewRepo(_ context.Context, args []string) error {
 		return scaffoldCustomRepo(root, domainName, entityName)
 	}
 
-	if err := scaffoldRepoForTable(root, dbName, domainName, table); err != nil {
+	if err := scaffoldRepoForTable(root, dbName, domainName, table, fwSourceDir); err != nil {
 		return err
 	}
 
 	// Also scaffold bridge.yml for HTTP route configuration.
-	if err := scaffoldBridgeYMLForTable(root, domainName, table); err != nil {
+	if err := scaffoldBridgeYMLForTable(root, domainName, table, fwSourceDir); err != nil {
 		return err
 	}
 
@@ -182,7 +185,7 @@ func findTable(root string, m *manifest.Manifest, dbName, tableName, entityName 
 // scaffoldRepoForTable creates the repo directory and a queries.sql file
 // with default CRUD operations derived from the reflected table schema.
 // Go code (model.go, repository.go, store.go) is created by `gopernicus generate`.
-func scaffoldRepoForTable(root, dbName, domainName string, table *schema.TableInfo) error {
+func scaffoldRepoForTable(root, dbName, domainName string, table *schema.TableInfo, fwSourceDir string) error {
 	tableName := table.TableName
 	entitySingular := generators.Singularize(tableName)
 	anc := detectAncestry(table)
@@ -192,11 +195,11 @@ func scaffoldRepoForTable(root, dbName, domainName string, table *schema.TableIn
 		return fmt.Errorf("creating %s: %w", repoDir, err)
 	}
 
-	// If this is a known framework table, use embedded pre-baked files
-	// (includes custom queries, store methods, repository methods).
+	// If this is a known framework table, use pre-baked files from the
+	// framework source (includes custom queries, store methods, repository methods).
 	// Otherwise scaffold a generic CRUD queries.sql.
-	if embeddedFiles := frameworkrepos.Files(domainName, tableName); len(embeddedFiles) > 0 {
-		for relPath, content := range embeddedFiles {
+	if repoFiles := fwsource.RepoFiles(fwSourceDir, domainName, tableName); len(repoFiles) > 0 {
+		for relPath, content := range repoFiles {
 			dest := filepath.Join(repoDir, filepath.FromSlash(relPath))
 			if fileExists(dest) {
 				fmt.Printf("  skip  %s/%s/%s (already exists)\n", domainName, tableName, relPath)
@@ -257,7 +260,7 @@ func scaffoldCustomRepo(root, domainName, entityName string) error {
 // scaffoldBridgeYMLForTable creates bridge files for an entity.
 // If embedded bridge files exist (framework tables), use those.
 // Otherwise scaffold a default bridge.yml from the table schema.
-func scaffoldBridgeYMLForTable(root, domainName string, table *schema.TableInfo) error {
+func scaffoldBridgeYMLForTable(root, domainName string, table *schema.TableInfo, fwSourceDir string) error {
 	tableName := table.TableName
 	entitySingular := generators.Singularize(tableName)
 	entityPascal := generators.ToPascalCase(entitySingular)
@@ -268,9 +271,9 @@ func scaffoldBridgeYMLForTable(root, domainName string, table *schema.TableInfo)
 		return fmt.Errorf("creating bridge dir: %w", err)
 	}
 
-	// Check for embedded bridge files from framework repos.
-	embeddedFiles := frameworkrepos.Files(domainName, tableName)
-	for relPath, content := range embeddedFiles {
+	// Check for bridge files from the framework source.
+	repoFiles := fwsource.RepoFiles(fwSourceDir, domainName, tableName)
+	for relPath, content := range repoFiles {
 		if !strings.HasPrefix(relPath, "bridge/") {
 			continue
 		}
