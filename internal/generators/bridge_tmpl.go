@@ -39,9 +39,9 @@ import (
 {{- end}}
 
 {{- if .NeedsBridgeFOPImport}}
-	fopb "{{.FrameworkPath}}/bridge/fop"
+	fopb "{{.FrameworkPath}}/bridge/transit/fop"
 {{- end}}
-	"{{.FrameworkPath}}/bridge/protocol/httpmid"
+	"{{.FrameworkPath}}/bridge/transit/httpmid"
 {{- if .NeedsAuthorizationImport}}
 	"{{.FrameworkPath}}/core/auth/authorization"
 {{- end}}
@@ -678,7 +678,7 @@ package {{.BridgePackage}}
 import (
 	"log/slog"
 
-	"{{.FrameworkPath}}/bridge/protocol/httpmid"
+	"{{.FrameworkPath}}/bridge/transit/httpmid"
 	"{{.FrameworkPath}}/core/auth/authentication"
 {{- if .AuthEnabled}}
 	"{{.FrameworkPath}}/core/auth/authorization"

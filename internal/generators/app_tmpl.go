@@ -35,7 +35,7 @@ import (
 	"github.com/gopernicus/gopernicus/infrastructure/events/outbox"
 	eventoutboxrepo "{{.ModulePath}}/core/repositories/events/eventoutbox"
 	eventoutboxpgx "{{.ModulePath}}/core/repositories/events/eventoutbox/eventoutboxpgx"
-	eventssatisfiers "{{.ModulePath}}/core/events/satisfiers"
+	eventssatisfiers "{{.ModulePath}}/core/transit/events/satisfiers"
 {{- end}}
 {{- if .HasStorage}}
 	"github.com/gopernicus/gopernicus/infrastructure/storage"
@@ -320,7 +320,7 @@ func configStorage(envPrefix string, log *slog.Logger) (*storage.FileStorer, err
 		return nil, fmt.Errorf("unsupported storage backend: %q", backend)
 {{- end}}
 	}
-	return storage.New(log, client), nil
+	return storage.New(client, storage.WithLogger(log)), nil
 }
 {{- end}}
 
@@ -335,10 +335,10 @@ func configEmail(envPrefix string, log *slog.Logger) (*emailer.Emailer, error) {
 			defaultFrom,
 			os.Getenv(envPrefix+"_EMAIL_FROM_NAME"),
 		)
-		return emailer.New(log, client, defaultFrom)
+		return emailer.New(client, defaultFrom, emailer.WithLogger(log))
 	}
 {{- end}}
-	return emailer.New(log, stdoutemailer.New(log), defaultFrom)
+	return emailer.New(stdoutemailer.New(log), defaultFrom, emailer.WithLogger(log))
 }
 `
 
@@ -352,7 +352,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/gopernicus/gopernicus/bridge/protocol/httpmid"
+	"github.com/gopernicus/gopernicus/bridge/transit/httpmid"
 {{- if .HasAuthentication}}
 	"github.com/gopernicus/gopernicus/core/auth/authentication"
 {{- end}}
@@ -462,7 +462,7 @@ func New(ctx context.Context, log *slog.Logger, cfg Config, infra Infrastructure
 	// Rate Limiter
 	// =========================================================================
 
-	rateLimiter := ratelimiter.New(memorylimiter.New(), ratelimiter.NewDefaultResolver(), log)
+	rateLimiter := ratelimiter.New(memorylimiter.New(), ratelimiter.NewDefaultResolver(), ratelimiter.WithLogger(log))
 	log.InfoContext(ctx, "init", "service", "rate_limiter")
 
 	// =========================================================================

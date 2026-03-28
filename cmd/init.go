@@ -555,8 +555,11 @@ func scaffoldProject(opts initOpts) (string, error) {
 				manifest.MigrationsDir("primary"),
 				"core/repositories",
 				"core/cases",
+				"core/transit",
+				"core/auth",
 				"bridge/repositories",
 				"bridge/cases",
+				"bridge/transit",
 				"infrastructure",
 				"sdk",
 				"workshop/dev",
@@ -794,6 +797,13 @@ func copyFeatureAssets(target, modulePath, fwVersion string, features featureSel
 		if err := copyDirRecursive(satSrc, satDst); err != nil {
 			return fmt.Errorf("copying authentication satisfiers: %w", err)
 		}
+
+		fmt.Printf("  → copying authentication bridge\n")
+		authBridgeSrc := filepath.Join(source, "bridge", "auth", "authentication")
+		authBridgeDst := filepath.Join(target, "bridge", "auth", "authentication")
+		if err := copyDirRecursive(authBridgeSrc, authBridgeDst); err != nil {
+			return fmt.Errorf("copying authentication bridge: %w", err)
+		}
 	}
 	if features.Authorization {
 		fmt.Printf("  → copying authorization satisfiers\n")
@@ -802,11 +812,18 @@ func copyFeatureAssets(target, modulePath, fwVersion string, features featureSel
 		if err := copyDirRecursive(satSrc, satDst); err != nil {
 			return fmt.Errorf("copying authorization satisfiers: %w", err)
 		}
+
+		fmt.Printf("  → copying invitations bridge\n")
+		invBridgeSrc := filepath.Join(source, "bridge", "auth", "invitations")
+		invBridgeDst := filepath.Join(target, "bridge", "auth", "invitations")
+		if err := copyDirRecursive(invBridgeSrc, invBridgeDst); err != nil {
+			return fmt.Errorf("copying invitations bridge: %w", err)
+		}
 	}
 	if features.EventsOutbox {
 		fmt.Printf("  → copying events satisfiers\n")
-		satSrc := filepath.Join(source, "core", "events", "satisfiers")
-		satDst := filepath.Join(target, "core", "events", "satisfiers")
+		satSrc := filepath.Join(source, "core", "transit", "events", "satisfiers")
+		satDst := filepath.Join(target, "core", "transit", "events", "satisfiers")
 		if err := copyDirRecursive(satSrc, satDst); err != nil {
 			return fmt.Errorf("copying events satisfiers: %w", err)
 		}
@@ -815,7 +832,7 @@ func copyFeatureAssets(target, modulePath, fwVersion string, features featureSel
 	// Rewrite import paths in all copied .go files.
 	if modulePath != gopernicusModule {
 		fmt.Printf("  → rewriting import paths\n")
-		for _, layer := range []string{"core/repositories", "core/auth/authentication/satisfiers", "core/auth/authorization/satisfiers", "core/events/satisfiers", "bridge/repositories"} {
+		for _, layer := range []string{"core/repositories", "core/auth/authentication/satisfiers", "core/auth/authorization/satisfiers", "core/transit/events/satisfiers", "bridge/repositories", "bridge/auth"} {
 			dir := filepath.Join(target, layer)
 			if _, err := os.Stat(dir); err != nil {
 				continue
