@@ -23,6 +23,9 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/gopernicus/gopernicus/infrastructure/database/postgres/pgxdb"
+{{- if .HasOutbox}}
+	"github.com/gopernicus/gopernicus/infrastructure/events"
+{{- end}}
 {{- if .HasList}}
 	"github.com/gopernicus/gopernicus/sdk/fop"
 {{- end}}
@@ -139,6 +142,44 @@ func (s *Store) {{.FuncName}}({{.Params}}) {{.Returns}} {
 	return record, nil
 }
 {{- else if eq .Category "exec"}}
+{{- if .EventOutbox}}
+
+func (s *Store) {{.FuncName}}({{.Params}}, outboxEvents ...events.OutboxEvent) error {
+	args := pgx.NamedArgs{
+{{- range .ExecArgs}}
+		"{{.ArgName}}": {{.GoExpr}},
+{{- end}}
+	}
+
+	query := ` + "`" + `{{.ExecSQL}}` + "`" + `
+
+	return pgxdb.InTx(ctx, s.db, func(tx pgx.Tx) error {
+{{- if .SkipRowCheck}}
+		_, err := tx.Exec(ctx, query, args)
+{{- else}}
+		result, err := tx.Exec(ctx, query, args)
+{{- end}}
+		if err != nil {
+			return pgxdb.HandlePgError(err)
+		}
+{{- if not .SkipRowCheck}}
+		if result.RowsAffected() == 0 {
+			return {{$.RepoPkg}}.Err{{$.EntityName}}NotFound
+		}
+{{- end}}
+
+		for _, evt := range outboxEvents {
+			if err := pgxdb.InsertOutboxEvent(ctx, tx, pgxdb.OutboxEvent{
+				Type:    evt.Type,
+				Payload: evt.Payload,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+{{- else}}
 
 func (s *Store) {{.FuncName}}({{.Params}}) error {
 	args := pgx.NamedArgs{
@@ -166,6 +207,7 @@ func (s *Store) {{.FuncName}}({{.Params}}) error {
 
 	return nil
 }
+{{- end}}
 {{- else if eq .Category "create"}}
 
 func (s *Store) {{.FuncName}}({{.Params}}) {{.Returns}} {

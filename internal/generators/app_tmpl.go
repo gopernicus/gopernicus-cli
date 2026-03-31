@@ -31,12 +31,6 @@ import (
 {{- if .HasRedisStreams}}
 	"github.com/gopernicus/gopernicus/infrastructure/events/goredisbus"
 {{- end}}
-{{- if .HasOutbox}}
-	"github.com/gopernicus/gopernicus/infrastructure/events/outbox"
-	eventoutboxrepo "{{.ModulePath}}/core/repositories/events/eventoutbox"
-	eventoutboxpgx "{{.ModulePath}}/core/repositories/events/eventoutbox/eventoutboxpgx"
-	eventssatisfiers "{{.ModulePath}}/core/transit/events/satisfiers"
-{{- end}}
 {{- if .HasStorage}}
 	"github.com/gopernicus/gopernicus/infrastructure/storage"
 {{- end}}
@@ -49,6 +43,7 @@ import (
 {{- if .HasStorageS3}}
 	"github.com/gopernicus/gopernicus/infrastructure/storage/s3"
 {{- end}}
+	"github.com/gopernicus/gopernicus/infrastructure/tracing/stdouttrace"
 	"github.com/gopernicus/gopernicus/sdk/environment"
 	"github.com/gopernicus/gopernicus/sdk/logger"
 )
@@ -79,6 +74,18 @@ func main() {
 }
 
 func run(ctx context.Context, log *slog.Logger) error {
+	// =========================================================================
+	// Telemetry
+	// =========================================================================
+
+	provider, err := stdouttrace.NewSimple(AppName)
+	if err != nil {
+		return fmt.Errorf("creating telemetry provider: %w", err)
+	}
+	provider.RegisterGlobal()
+	defer provider.Shutdown(ctx)
+	log.InfoContext(ctx, "init", "service", "telemetry")
+
 	// =========================================================================
 	// Database
 	// =========================================================================
@@ -130,26 +137,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 	//     (messages stay in the stream). Use when events must survive a crash.
 	//     Select via {{.AppNameUpper}}_EVENT_BUS_BACKEND=redis-streams.
 	//
-	//  4. eventBus (outbox-decorated) — durable delivery via event_outbox table.
-	//     Events marked IsOutbox()=true are written to the DB atomically with
-	//     the business transaction. A separate worker (app/workers/) claims and
-	//     dispatches them. Guarantees at-least-once delivery across restarts.
-	//     Use for critical cross-service events that must not be lost.
-
-	innerBus := configEventBus(AppName, log{{- if .HasRedis}}, rdb{{- end}})
-{{- if .HasOutbox}}
-
-	var outboxOpts outbox.Options
-	if err := environment.ParseEnvTags(AppName, &outboxOpts); err != nil {
-		return fmt.Errorf("parsing outbox config: %w", err)
-	}
-	outboxStore := eventoutboxpgx.NewStore(log, pool)
-	outboxRepo := eventoutboxrepo.NewRepository(outboxStore)
-	outboxWriter := eventssatisfiers.NewOutboxWriterSatisfier(outboxRepo)
-	eventBus := outbox.NewBus(innerBus, outboxWriter, outboxOpts, log)
-{{- else}}
-	eventBus := innerBus
-{{- end}}
+	eventBus := configEventBus(AppName, log{{- if .HasRedis}}, rdb{{- end}})
 	log.InfoContext(ctx, "init", "service", "event_bus")
 
 	// =========================================================================
@@ -192,6 +180,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 		},
 		server.Infrastructure{
 			Pool:     pool,
+			Provider: provider,
 			EventBus: eventBus,
 			Cache:    cacher,
 {{- if .HasStorage}}
@@ -353,6 +342,7 @@ import (
 	"net/http"
 
 	"github.com/gopernicus/gopernicus/bridge/transit/httpmid"
+	"github.com/gopernicus/gopernicus/telemetry"
 {{- if .HasAuthentication}}
 	"github.com/gopernicus/gopernicus/core/auth/authentication"
 {{- end}}
@@ -408,6 +398,7 @@ import (
 type Server struct {
 	Log        *slog.Logger
 	Pool       *pgxdb.Pool
+	Provider   *telemetry.Provider
 	Handler    *web.WebHandler
 	HTTPServer *web.WebServer
 	EventBus   events.Bus
@@ -428,6 +419,7 @@ type Config struct {
 // These are resources that tests need to swap (testcontainers, mocks).
 type Infrastructure struct {
 	Pool     *pgxdb.Pool         // required: database connection
+	Provider *telemetry.Provider // optional: nil disables tracing
 	EventBus events.Bus          // optional: nil disables async events
 	Cache    *cache.Cache        // optional: nil disables caching
 {{- if .HasStorage}}
@@ -568,9 +560,11 @@ func New(ctx context.Context, log *slog.Logger, cfg Config, infra Infrastructure
 
 	// Global middleware stack — applied to every request.
 	webHandler.Use(
-		httpmid.TrustProxies(0),
-		httpmid.Logger(log),
 		httpmid.Panics(log),
+		httpmid.TelemetryMiddleware(infra.Provider.Tracer()),
+		httpmid.TrustProxies(0),
+		httpmid.ClientInfo(),
+		httpmid.Logger(log),
 	)
 
 	// =========================================================================
@@ -654,6 +648,7 @@ func New(ctx context.Context, log *slog.Logger, cfg Config, infra Infrastructure
 	return &Server{
 		Log:        log,
 		Pool:       infra.Pool,
+		Provider:   infra.Provider,
 		Handler:    webHandler,
 		HTTPServer: httpServer,
 		EventBus:   bus,
@@ -685,10 +680,17 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		s.Log.WarnContext(ctx, "shutdown", "component", "async_pool", "error", err)
 	}
 
-	// 3. Finally, close the event bus.
+	// 3. Close the event bus.
 	if s.EventBus != nil {
 		if err := s.EventBus.Close(ctx); err != nil {
 			s.Log.WarnContext(ctx, "shutdown", "component", "events", "error", err)
+		}
+	}
+
+	// 4. Flush telemetry spans.
+	if s.Provider != nil {
+		if err := s.Provider.Shutdown(ctx); err != nil {
+			s.Log.WarnContext(ctx, "shutdown", "component", "telemetry", "error", err)
 		}
 	}
 
@@ -770,13 +772,6 @@ const envExampleTemplate = `# {{.AppNameUpper}} Configuration
 {{.AppNameUpper}}_EVENT_BUS_WORKERS=4
 {{.AppNameUpper}}_EVENT_BUS_BATCH_SIZE=10
 {{.AppNameUpper}}_EVENT_BUS_BLOCK_TIMEOUT=5s
-{{- end}}
-{{- if .HasOutbox}}
-
-# ── Event Outbox ──────────────────────────────────────────────────────────────
-{{.AppNameUpper}}_EVENTS_OUTBOX_MAX_RETRIES=3
-{{.AppNameUpper}}_EVENTS_OUTBOX_RETRY_BASE_DELAY=1s
-{{.AppNameUpper}}_EVENTS_OUTBOX_RETRY_MAX_DELAY=5m
 {{- end}}
 `
 

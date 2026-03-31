@@ -555,7 +555,7 @@ func scaffoldProject(opts initOpts) (string, error) {
 				manifest.MigrationsDir("primary"),
 				"core/repositories",
 				"core/cases",
-				"core/transit",
+				"core/repositories/events/eventoutbox/satisfiers",
 				"core/auth",
 				"bridge/repositories",
 				"bridge/cases",
@@ -713,7 +713,7 @@ func copyFeatureAssets(target, modulePath, fwVersion string, features featureSel
 		{"authentication", "0001_auth.sql"},
 		{"authorization", "0002_rebac.sql"},
 		{"tenancy", "0003_tenants.sql"},
-		{"events-outbox", "0004_events.sql"},
+		{"events-outbox", "0004_jobs_and_outbox.sql"},
 	}
 
 	for _, mig := range migrations {
@@ -751,7 +751,8 @@ func copyFeatureAssets(target, modulePath, fwVersion string, features featureSel
 		{"authentication", "auth", "authreposbridge"},
 		{"authorization", "rebac", "rebacreposbridge"},
 		{"tenancy", "tenancy", "tenancyreposbridge"},
-		{"events-outbox", "events", "eventsreposbridge"},
+		{"events-outbox", "events", ""},
+		{"events-outbox", "jobs", ""},
 	}
 
 	for _, d := range domains {
@@ -779,6 +780,9 @@ func copyFeatureAssets(target, modulePath, fwVersion string, features featureSel
 		}
 
 		// Copy bridge/repositories/{domain}reposbridge/
+		if d.bridgeDir == "" {
+			continue
+		}
 		bridgeSrc := filepath.Join(source, "bridge", "repositories", d.bridgeDir)
 		if _, err := os.Stat(bridgeSrc); err == nil {
 			fmt.Printf("  → copying %s bridge repositories\n", d.featureName)
@@ -822,8 +826,8 @@ func copyFeatureAssets(target, modulePath, fwVersion string, features featureSel
 	}
 	if features.EventsOutbox {
 		fmt.Printf("  → copying events satisfiers\n")
-		satSrc := filepath.Join(source, "core", "transit", "events", "satisfiers")
-		satDst := filepath.Join(target, "core", "transit", "events", "satisfiers")
+		satSrc := filepath.Join(source, "core", "repositories", "events", "eventoutbox", "satisfiers")
+		satDst := filepath.Join(target, "core", "repositories", "events", "eventoutbox", "satisfiers")
 		if err := copyDirRecursive(satSrc, satDst); err != nil {
 			return fmt.Errorf("copying events satisfiers: %w", err)
 		}
@@ -832,7 +836,7 @@ func copyFeatureAssets(target, modulePath, fwVersion string, features featureSel
 	// Rewrite import paths in all copied .go files.
 	if modulePath != gopernicusModule {
 		fmt.Printf("  → rewriting import paths\n")
-		for _, layer := range []string{"core/repositories", "core/auth/authentication/satisfiers", "core/auth/authorization/satisfiers", "core/transit/events/satisfiers", "bridge/repositories", "bridge/auth"} {
+		for _, layer := range []string{"core/repositories", "core/auth/authentication/satisfiers", "core/auth/authorization/satisfiers", "core/repositories/events/eventoutbox/satisfiers", "bridge/repositories", "bridge/auth"} {
 			dir := filepath.Join(target, layer)
 			if _, err := os.Stat(dir); err != nil {
 				continue

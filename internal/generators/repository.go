@@ -79,8 +79,10 @@ type MethodSig struct {
 
 	// Event emission (from @event annotation).
 	EventType          string // e.g. "user.created" — empty means no event
+	EventOutbox        bool   // true when @event has "outbox" modifier — atomic outbox write instead of bus.Emit
 	EventAliasName     string // e.g. "UserCreatedEvent" — for emit call
 	EventGeneratedName string // e.g. "GeneratedUserCreatedEvent" — for struct literal
+	EventIsDelete      bool   // true when the exec event is a delete/soft-delete
 	EventPermanent     bool   // for delete events: true = hard delete, false = soft delete
 	EventPKExpr        string // Go variable name for the PK param (e.g. "userID"), resolved by name
 }
@@ -91,6 +93,7 @@ type RepoEventInfo struct {
 	GeneratedName string // "GeneratedUserCreatedEvent"
 	AliasName     string // "UserCreatedEvent"
 	Category      string // "create", "update", "exec"
+	IsDelete      bool   // true for delete/soft-delete exec events
 	EntityName    string // for create events: "User"
 	PKGoName      string // for update/exec events: "UserID"
 	PKGoType      string // for update/exec events: "string"
@@ -210,7 +213,11 @@ func GenerateRepository(resolved *ResolvedFile, repoDir string, opts Options) er
 func buildStorerMethodsBlock(data RepoTemplateData) string {
 	var b strings.Builder
 	for _, m := range data.Methods {
-		fmt.Fprintf(&b, "\t%s(%s) %s\n", m.Name, m.Params, m.Returns)
+		params := m.Params
+		if m.EventOutbox {
+			params += ", outboxEvents ...events.OutboxEvent"
+		}
+		fmt.Fprintf(&b, "\t%s(%s) %s\n", m.Name, params, m.Returns)
 	}
 	return b.String()
 }
@@ -425,6 +432,8 @@ func buildRepoTemplateData(resolved *ResolvedFile) (RepoTemplateData, error) {
 			ei.Category = "update"
 		default:
 			ei.Category = "exec"
+			lower := strings.ToLower(m.Name)
+			ei.IsDelete = strings.Contains(lower, "delete") || strings.Contains(lower, "softdelete")
 		}
 
 		events = append(events, ei)
@@ -685,12 +694,16 @@ func buildRepoMethods(resolved *ResolvedFile) ([]MethodSig, error) {
 		// Event annotation.
 		if rq.EventType != "" {
 			m.EventType = rq.EventType
+			m.EventOutbox = rq.EventOutbox
 			m.EventAliasName = eventAliasName(rq.EventType)
 			m.EventGeneratedName = "Generated" + m.EventAliasName
 			// For delete exec events, determine Permanent flag from func name.
 			if m.Category == "exec" {
 				lower := strings.ToLower(rq.FuncName)
-				m.EventPermanent = !strings.Contains(lower, "soft")
+				m.EventIsDelete = strings.Contains(lower, "delete") || strings.Contains(lower, "softdelete")
+				if m.EventIsDelete {
+					m.EventPermanent = !strings.Contains(lower, "soft")
+				}
 			}
 			// Resolve the PK param by name for event emission.
 			// Create events don't need this — the PK comes from the returned record.

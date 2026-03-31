@@ -87,8 +87,16 @@ func ParseString(input string) (*File, error) {
 			cacheSpec = v
 		}
 		eventType := ""
+		eventOutbox := false
 		if v, ok := annotations["event"]; ok {
-			eventType = v
+			// @event: user.created outbox → eventType="user.created", eventOutbox=true
+			parts := strings.Fields(v)
+			eventType = parts[0]
+			for _, p := range parts[1:] {
+				if p == "outbox" {
+					eventOutbox = true
+				}
+			}
 		}
 		scanOverride := annotations["scan"]
 
@@ -115,6 +123,7 @@ func ParseString(input string) (*File, error) {
 			SearchSpec:     searchSpec,
 			CacheSpec:      cacheSpec,
 			EventType:      eventType,
+			EventOutbox:    eventOutbox,
 			TypeHints:       typeHints,
 			ScanOverride:   scanOverride,
 		}
