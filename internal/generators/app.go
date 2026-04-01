@@ -38,6 +38,7 @@ type AppScaffoldData struct {
 	HasStorageGCS   bool // Google Cloud Storage adapter
 	HasStorageS3    bool // AWS S3 / compatible object storage adapter
 	HasSendGrid     bool // SendGrid email delivery adapter
+	HasTelemetry    bool // Telemetry stack (Jaeger for now; Grafana/Prometheus later)
 
 	// Derived flags — computed from the above, not set directly.
 	HasStorage bool // true if any storage adapter selected (Disk, GCS, or S3)

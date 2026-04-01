@@ -76,6 +76,7 @@ type infrastructureSelection struct {
 	HasStorageGCS  bool // Google Cloud Storage
 	HasStorageS3   bool // AWS S3 / compatible
 	HasSendGrid    bool // SendGrid email delivery
+	HasTelemetry   bool // Telemetry stack (Jaeger)
 }
 
 // aiCompanionSelection tracks which AI coding assistant to bootstrap.
@@ -97,6 +98,7 @@ func defaultInfrastructure() infrastructureSelection {
 		HasStorageDisk:  true,
 		HasStorageGCS:   true,
 		HasSendGrid:     true,
+		HasTelemetry:    true,
 	}
 }
 
@@ -510,6 +512,22 @@ func runInfraPicker() (infrastructureSelection, error) {
 		return defaultInfrastructure(), fmt.Errorf("cancelled")
 	}
 
+	// Screen 5: Telemetry
+	r5, err := tui.RunPicker("Telemetry", []tui.PickerCategory{
+		{
+			Name: "Telemetry",
+			Items: []tui.PickerItem{
+				{Name: "Jaeger", Description: "Distributed tracing via OpenTelemetry + Jaeger", Selected: true},
+			},
+		},
+	})
+	if err != nil {
+		return defaultInfrastructure(), err
+	}
+	if r5.Cancelled {
+		return defaultInfrastructure(), fmt.Errorf("cancelled")
+	}
+
 	infra := infrastructureSelection{}
 	for _, name := range r1.Selected {
 		if name == "Redis Cache" {
@@ -535,6 +553,11 @@ func runInfraPicker() (infrastructureSelection, error) {
 	for _, name := range r4.Selected {
 		if name == "SendGrid" {
 			infra.HasSendGrid = true
+		}
+	}
+	for _, name := range r5.Selected {
+		if name == "Jaeger" {
+			infra.HasTelemetry = true
 		}
 	}
 	return infra, nil
@@ -651,6 +674,7 @@ func scaffoldProject(opts initOpts) (string, error) {
 				HasStorageGCS:     opts.infra.HasStorageGCS,
 				HasStorageS3:      opts.infra.HasStorageS3,
 				HasSendGrid:       opts.infra.HasSendGrid,
+				HasTelemetry:      opts.infra.HasTelemetry,
 				HasStorage:        hasStorage,
 			})
 		}},
@@ -1134,6 +1158,9 @@ const defaultGitignore = `# Binaries
 .env
 .env.*
 !.env.example
+
+# Dev infrastructure data
+workshop/dev/data/
 
 # Editor
 .DS_Store
