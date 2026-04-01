@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -42,7 +43,8 @@ type featureSelection struct {
 	Authentication bool
 	Authorization  bool
 	Tenancy        bool
-	EventsOutbox   bool
+	EventOutbox    bool
+	JobQueue       bool
 }
 
 // allFeatures returns a selection with everything enabled (the default).
@@ -51,7 +53,8 @@ func allFeatures() featureSelection {
 		Authentication: true,
 		Authorization:  true,
 		Tenancy:        true,
-		EventsOutbox:   true, // on by default — transactional outbox for reliable events
+		EventOutbox:    true, // transactional outbox for reliable event delivery
+		JobQueue:       true, // durable deferred job processing with retry
 	}
 }
 
@@ -62,7 +65,7 @@ func noFeatures() featureSelection {
 
 // any returns true if at least one feature is selected.
 func (f featureSelection) any() bool {
-	return f.Authentication || f.Authorization || f.Tenancy || f.EventsOutbox
+	return f.Authentication || f.Authorization || f.Tenancy || f.EventOutbox || f.JobQueue
 }
 
 // infrastructureSelection tracks which infrastructure adapters to bootstrap.
@@ -73,6 +76,16 @@ type infrastructureSelection struct {
 	HasStorageGCS  bool // Google Cloud Storage
 	HasStorageS3   bool // AWS S3 / compatible
 	HasSendGrid    bool // SendGrid email delivery
+}
+
+// aiCompanionSelection tracks which AI coding assistant to bootstrap.
+type aiCompanionSelection struct {
+	Claude bool // CLAUDE.md + .claude/skills/
+}
+
+// defaultAICompanion returns the default AI companion selection.
+func defaultAICompanion() aiCompanionSelection {
+	return aiCompanionSelection{Claude: true}
 }
 
 // defaultInfrastructure returns the default infrastructure selection.
@@ -104,7 +117,7 @@ func runInit(_ context.Context, args []string) error {
 
 	// Copy feature assets (migrations, repos, bridges) from gopernicus source.
 	if opts.features.any() {
-		if err := copyFeatureAssets(target, opts.modulePath, opts.frameworkVersion, opts.features); err != nil {
+		if err := copyFeatureAssets(target, opts.modulePath, opts.projectName, opts.frameworkVersion, opts.features, opts.ai); err != nil {
 			return err
 		}
 	}
@@ -166,6 +179,7 @@ type initOpts struct {
 	featuresFlag     string // raw --features value; "" means use default (all)
 	features         featureSelection
 	infra            infrastructureSelection
+	ai               aiCompanionSelection
 }
 
 func parseInitArgs(args []string) (initOpts, error) {
@@ -287,6 +301,13 @@ func resolveInitOptsInteractive(opts *initOpts) error {
 	}
 	opts.infra = infra
 
+	// AI companion picker — always shown interactively.
+	ai, err := runAICompanionPicker()
+	if err != nil {
+		return err
+	}
+	opts.ai = ai
+
 	return nil
 }
 
@@ -321,14 +342,15 @@ func resolveInitOptsPlain(opts *initOpts) error {
 		opts.features = allFeatures()
 	}
 
-	// Use defaults for infrastructure in non-interactive mode.
+	// Use defaults for infrastructure and AI companion in non-interactive mode.
 	opts.infra = defaultInfrastructure()
+	opts.ai = defaultAICompanion()
 
 	return nil
 }
 
 // parseFeaturesFlag parses the --features flag value.
-// Accepts: "none", "authentication", "authorization", "tenancy", "events-outbox", or comma-separated.
+// Accepts: "none", "authentication", "authorization", "tenancy", "event-outbox", "job-queue", or comma-separated.
 func parseFeaturesFlag(value string) (featureSelection, error) {
 	value = strings.TrimSpace(strings.ToLower(value))
 	if value == "none" {
@@ -348,10 +370,12 @@ func parseFeaturesFlag(value string) (featureSelection, error) {
 			features.Authorization = true
 		case "tenancy":
 			features.Tenancy = true
-		case "events-outbox":
-			features.EventsOutbox = true
+		case "event-outbox":
+			features.EventOutbox = true
+		case "job-queue":
+			features.JobQueue = true
 		default:
-			return features, fmt.Errorf("unknown feature %q (valid: authentication, authorization, tenancy, events-outbox, none, all)", name)
+			return features, fmt.Errorf("unknown feature %q (valid: authentication, authorization, tenancy, event-outbox, job-queue, none, all)", name)
 		}
 	}
 	return features, nil
@@ -383,7 +407,8 @@ func runFeaturePicker() (featureSelection, error) {
 		{
 			Name: "Event Infrastructure",
 			Items: []tui.PickerItem{
-				{Name: "Events Outbox", Description: "durable event delivery via event_outbox table", Selected: true},
+				{Name: "Event Outbox", Description: "transactional outbox for atomic event delivery", Selected: true},
+				{Name: "Job Queue", Description: "durable deferred processing with retry and dead-lettering", Selected: true},
 			},
 		},
 	})
@@ -406,8 +431,11 @@ func runFeaturePicker() (featureSelection, error) {
 		}
 	}
 	for _, name := range r2.Selected {
-		if name == "Events Outbox" {
-			features.EventsOutbox = true
+		switch name {
+		case "Event Outbox":
+			features.EventOutbox = true
+		case "Job Queue":
+			features.JobQueue = true
 		}
 	}
 	return features, nil
@@ -512,6 +540,31 @@ func runInfraPicker() (infrastructureSelection, error) {
 	return infra, nil
 }
 
+func runAICompanionPicker() (aiCompanionSelection, error) {
+	r, err := tui.RunPicker("AI Companion", []tui.PickerCategory{
+		{
+			Name: "AI Companion",
+			Items: []tui.PickerItem{
+				{Name: "Claude", Description: "CLAUDE.md project config and .claude/skills for common workflows", Selected: true},
+			},
+		},
+	})
+	if err != nil {
+		return aiCompanionSelection{}, err
+	}
+	if r.Cancelled {
+		return aiCompanionSelection{}, fmt.Errorf("cancelled")
+	}
+
+	var ai aiCompanionSelection
+	for _, name := range r.Selected {
+		if name == "Claude" {
+			ai.Claude = true
+		}
+	}
+	return ai, nil
+}
+
 func scaffoldProject(opts initOpts) (string, error) {
 	target, err := filepath.Abs(opts.projectName)
 	if err != nil {
@@ -555,7 +608,6 @@ func scaffoldProject(opts initOpts) (string, error) {
 				manifest.MigrationsDir("primary"),
 				"core/repositories",
 				"core/cases",
-				"core/repositories/events/eventoutbox/satisfiers",
 				"core/auth",
 				"bridge/repositories",
 				"bridge/cases",
@@ -592,7 +644,7 @@ func scaffoldProject(opts initOpts) (string, error) {
 				HasAuthentication: opts.features.Authentication,
 				HasAuthorization:  opts.features.Authorization,
 				HasTenancy:        opts.features.Tenancy,
-				HasOutbox:         opts.features.EventsOutbox,
+				HasOutbox:         opts.features.EventOutbox,
 				HasRedis:          opts.infra.HasRedis,
 				HasRedisStreams:    opts.infra.HasRedisStreams,
 				HasStorageDisk:    opts.infra.HasStorageDisk,
@@ -639,11 +691,16 @@ func applyFeatureSelection(m *manifest.Manifest, features featureSelection) {
 		m.Features.Tenancy = ""
 	}
 
-	if features.EventsOutbox {
+	if features.EventOutbox || features.JobQueue {
 		if m.Events == nil {
 			m.Events = &manifest.EventsConfig{}
 		}
-		m.Events.Outbox = manifest.FeatureGopernicus
+		if features.EventOutbox {
+			m.Events.Outbox = manifest.FeatureGopernicus
+		}
+		if features.JobQueue {
+			m.Events.JobQueue = manifest.FeatureGopernicus
+		}
 	}
 
 	// Set domain mappings for selected features.
@@ -685,9 +742,15 @@ func applyFeatureSelection(m *manifest.Manifest, features featureSelection) {
 		}
 	}
 
-	if features.EventsOutbox {
+	if features.EventOutbox {
 		db.Domains["events"] = []string{
 			"event_outbox",
+		}
+	}
+
+	if features.JobQueue {
+		db.Domains["jobs"] = []string{
+			"job_queue",
 		}
 	}
 }
@@ -696,7 +759,7 @@ func applyFeatureSelection(m *manifest.Manifest, features featureSelection) {
 // repositories from the gopernicus framework source into the new project.
 // Go files have their import paths rewritten from the gopernicus module to
 // the user's module path.
-func copyFeatureAssets(target, modulePath, fwVersion string, features featureSelection) error {
+func copyFeatureAssets(target, modulePath, projectName, fwVersion string, features featureSelection, ai aiCompanionSelection) error {
 	source, err := gopernicusSourceDir(fwVersion)
 	if err != nil {
 		return fmt.Errorf("resolving gopernicus source: %w", err)
@@ -713,7 +776,8 @@ func copyFeatureAssets(target, modulePath, fwVersion string, features featureSel
 		{"authentication", "0001_auth.sql"},
 		{"authorization", "0002_rebac.sql"},
 		{"tenancy", "0003_tenants.sql"},
-		{"events-outbox", "0004_jobs_and_outbox.sql"},
+		{"event-outbox", "0004_event_outbox.sql"},
+		{"job-queue", "0005_job_queue.sql"},
 	}
 
 	for _, mig := range migrations {
@@ -725,8 +789,10 @@ func copyFeatureAssets(target, modulePath, fwVersion string, features featureSel
 			enabled = features.Authorization
 		case "tenancy":
 			enabled = features.Tenancy
-		case "events-outbox":
-			enabled = features.EventsOutbox
+		case "event-outbox":
+			enabled = features.EventOutbox
+		case "job-queue":
+			enabled = features.JobQueue
 		}
 		if !enabled {
 			continue
@@ -751,8 +817,8 @@ func copyFeatureAssets(target, modulePath, fwVersion string, features featureSel
 		{"authentication", "auth", "authreposbridge"},
 		{"authorization", "rebac", "rebacreposbridge"},
 		{"tenancy", "tenancy", "tenancyreposbridge"},
-		{"events-outbox", "events", ""},
-		{"events-outbox", "jobs", ""},
+		{"event-outbox", "events", ""},
+		{"job-queue", "jobs", ""},
 	}
 
 	for _, d := range domains {
@@ -764,8 +830,10 @@ func copyFeatureAssets(target, modulePath, fwVersion string, features featureSel
 			enabled = features.Authorization
 		case "tenancy":
 			enabled = features.Tenancy
-		case "events-outbox":
-			enabled = features.EventsOutbox
+		case "event-outbox":
+			enabled = features.EventOutbox
+		case "job-queue":
+			enabled = features.JobQueue
 		}
 		if !enabled {
 			continue
@@ -824,19 +892,49 @@ func copyFeatureAssets(target, modulePath, fwVersion string, features featureSel
 			return fmt.Errorf("copying invitations bridge: %w", err)
 		}
 	}
-	if features.EventsOutbox {
-		fmt.Printf("  → copying events satisfiers\n")
-		satSrc := filepath.Join(source, "core", "repositories", "events", "eventoutbox", "satisfiers")
-		satDst := filepath.Join(target, "core", "repositories", "events", "eventoutbox", "satisfiers")
-		if err := copyDirRecursive(satSrc, satDst); err != nil {
-			return fmt.Errorf("copying events satisfiers: %w", err)
+	// Copy AI companion files when Claude is selected.
+	if ai.Claude {
+		claudeMDSrc := filepath.Join(source, "CLAUDE.md")
+		if _, err := os.Stat(claudeMDSrc); err == nil {
+			fmt.Printf("  → copying CLAUDE.md\n")
+			data, err := os.ReadFile(claudeMDSrc)
+			if err != nil {
+				return fmt.Errorf("reading CLAUDE.md: %w", err)
+			}
+			// Replace the placeholder with the actual project name.
+			content := strings.ReplaceAll(string(data), "__PROJECT_NAME__", projectName)
+			dst := filepath.Join(target, "CLAUDE.md")
+			if err := os.WriteFile(dst, []byte(content), 0644); err != nil {
+				return fmt.Errorf("writing CLAUDE.md: %w", err)
+			}
+		}
+
+		skillsSrc := filepath.Join(source, ".claude", "skills")
+		if _, err := os.Stat(skillsSrc); err == nil {
+			fmt.Printf("  → copying Claude skills\n")
+			skillsDst := filepath.Join(target, ".claude", "skills")
+			if err := copyDirRecursive(skillsSrc, skillsDst); err != nil {
+				return fmt.Errorf("copying Claude skills: %w", err)
+			}
+		}
+	}
+
+	// Copy framework documentation into the scaffolded project.
+	// Markdown files have YAML frontmatter stripped so they read cleanly
+	// outside the Docusaurus context.
+	docsSrc := filepath.Join(source, "workshop", "documentation", "docs")
+	if _, err := os.Stat(docsSrc); err == nil {
+		fmt.Printf("  → copying gopernicus documentation\n")
+		docsDst := filepath.Join(target, "workshop", "documentation", "gopernicus")
+		if err := copyDirStripFrontmatter(docsSrc, docsDst); err != nil {
+			return fmt.Errorf("copying documentation: %w", err)
 		}
 	}
 
 	// Rewrite import paths in all copied .go files.
 	if modulePath != gopernicusModule {
 		fmt.Printf("  → rewriting import paths\n")
-		for _, layer := range []string{"core/repositories", "core/auth/authentication/satisfiers", "core/auth/authorization/satisfiers", "core/repositories/events/eventoutbox/satisfiers", "bridge/repositories", "bridge/auth"} {
+		for _, layer := range []string{"core/repositories", "core/auth/authentication/satisfiers", "core/auth/authorization/satisfiers", "bridge/repositories"} {
 			dir := filepath.Join(target, layer)
 			if _, err := os.Stat(dir); err != nil {
 				continue
@@ -877,6 +975,58 @@ func copyDirRecursive(src, dst string) error {
 
 		return copyFile(path, target)
 	})
+}
+
+// copyDirStripFrontmatter copies all files and subdirectories from src to dst.
+// For .md files, YAML frontmatter (delimited by --- lines) is stripped so the
+// files read cleanly outside a Docusaurus context.
+func copyDirStripFrontmatter(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+
+		if info.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+
+		if strings.HasSuffix(info.Name(), ".md") {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			data = stripFrontmatter(data)
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return err
+			}
+			return os.WriteFile(target, data, 0644)
+		}
+
+		return copyFile(path, target)
+	})
+}
+
+// stripFrontmatter removes YAML frontmatter delimited by --- lines from the
+// start of a markdown file. Leading blank lines after removal are also trimmed.
+func stripFrontmatter(data []byte) []byte {
+	if !bytes.HasPrefix(data, []byte("---")) {
+		return data
+	}
+	// Find the closing --- after the opening one.
+	rest := data[3:]
+	idx := bytes.Index(rest, []byte("\n---"))
+	if idx == -1 {
+		return data
+	}
+	// Skip past the closing --- and its newline.
+	stripped := rest[idx+4:]
+	return bytes.TrimLeft(stripped, "\n")
 }
 
 // rewriteImports replaces oldModule with newModule in all .go files under dir.
