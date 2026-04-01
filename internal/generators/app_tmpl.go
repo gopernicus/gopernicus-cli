@@ -781,43 +781,52 @@ const dockerComposeTemplate = `name: {{.ProjectName}}
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
+    restart: unless-stopped
+    command: postgres -c ssl=off
     environment:
       POSTGRES_DB: {{.ProjectName}}
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+      PGDATA: /data/postgres
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - ./data/postgres-data:/data/postgres
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
       start_period: 10s
-    restart: unless-stopped
 {{- if .HasRedis}}
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
     ports:
       - "6379:6379"
     volumes:
-      - redisdata:/data
+      - ./data/redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
       start_period: 5s
-    restart: unless-stopped
 {{- end}}
+{{- if .HasTelemetry}}
 
-volumes:
-  pgdata:
-{{- if .HasRedis}}
-  redisdata:
+  jaeger:
+    image: jaegertracing/all-in-one:1.54
+    restart: unless-stopped
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
 {{- end}}
 `
 
@@ -888,7 +897,7 @@ logs-docker: ## Tail the Docker container logs
 # ── Development Infrastructure ───────────────────────────────────────────────
 
 .PHONY: dev-up
-dev-up: ## Start development infrastructure (postgres{{- if .HasRedis}}, redis{{- end}})
+dev-up: ## Start development infrastructure (postgres{{- if .HasRedis}}, redis{{- end}}{{- if .HasTelemetry}}, jaeger{{- end}})
 	$(COMPOSE) up -d
 
 .PHONY: dev-down
