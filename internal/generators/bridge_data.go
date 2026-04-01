@@ -1,7 +1,7 @@
 package generators
 
 // goperniculusFrameworkPath is the canonical module path for the gopernicus framework.
-// Framework packages (sdk, bridge/protocol, core/auth, infrastructure) always use this
+// Framework packages (sdk, bridge/transit, core/auth, infrastructure) always use this
 // path regardless of the project module path.
 const goperniculusFrameworkPath = "github.com/gopernicus/gopernicus"
 

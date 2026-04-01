@@ -58,7 +58,13 @@ type QueryBlock struct {
 	CacheSpec string
 
 	// Event type from @event: annotation (e.g. "user.created").
+	// Append "outbox" to route to the transactional outbox instead of bus.Emit:
+	//   @event: user.created         → bus.Emit at repository level
+	//   @event: user.created outbox  → atomic outbox write via store
 	EventType string
+
+	// EventOutbox is true when @event has the "outbox" modifier.
+	EventOutbox bool
 
 	// TypeHints maps param name → Go type, from @type:param_name go_type annotations.
 	// Overrides column-inferred types in resolve.

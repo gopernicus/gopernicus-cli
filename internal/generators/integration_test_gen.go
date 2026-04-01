@@ -77,7 +77,7 @@ func BuildIntegrationTestData(resolved *ResolvedFile, modulePath string) (Integr
 		EntityName:    resolved.EntityName,
 		EntityLower:   resolved.EntityLower,
 		RepoImport:    modulePath + "/core/repositories/" + resolved.DomainName + "/" + resolved.PackageName,
-		FixtureImport: modulePath + "/core/testing/fixtures",
+		FixtureImport: modulePath + "/workshop/testing/fixtures",
 		PKColumn:      resolved.PKColumn,
 		PKGoName:      resolved.PKGoName,
 		PKGoType:      resolved.PKGoType,

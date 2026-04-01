@@ -60,6 +60,10 @@ func GenerateAppScaffold(root string, data AppScaffoldData) error {
 		{".env.example", "envExample", envExampleTemplate},
 		{".env", "env", envExampleTemplate}, // same content — no real creds, safe to commit as starting point
 		{"workshop/dev/docker-compose.yml", "dockerCompose", dockerComposeTemplate},
+		{"workshop/docker/dockerfile." + data.ProjectName, "dockerfile", dockerfileTemplate},
+		{"workshop/documentation/README.md", "docsREADME", documentationREADMETemplate},
+		{"workshop/documentation/architecture/overview.md", "docsArchOverview", documentationArchOverviewTemplate},
+		{"workshop/documentation/deployment/docker.md", "docsDeployDocker", documentationDeployDockerTemplate},
 		{"Makefile", "makefile", makefileTemplate},
 	}
 

@@ -15,7 +15,7 @@ import (
 
 	"{{.FixtureImport}}"
 	"{{.FrameworkPath}}/infrastructure/cryptids"
-	"{{.FrameworkPath}}/infrastructure/testing/testhttp"
+	"{{.FrameworkPath}}/workshop/testing/testhttp"
 )
 
 // Ensure imports are used.

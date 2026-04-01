@@ -153,12 +153,18 @@ type {{.AliasName}} struct {
 	{{.PKGoName}} {{.PKGoType}} ` + "`" + `json:"{{.PKDBName}}"` + "`" + `
 	Update {{.UpdateName}} ` + "`" + `json:"update"` + "`" + `
 }
-{{- else}}
+{{- else if .IsDelete}}
 // {{.AliasName}} is emitted when a {{$.EntityNameLower}} is deleted.
 type {{.AliasName}} struct {
 	events.BaseEvent
 	{{.PKGoName}} {{.PKGoType}} ` + "`" + `json:"{{.PKDBName}}"` + "`" + `
 	Permanent bool ` + "`" + `json:"permanent"` + "`" + `
+}
+{{- else}}
+// {{.AliasName}} is emitted by {{$.EntityName}}.
+type {{.AliasName}} struct {
+	events.BaseEvent
+	{{.PKGoName}} {{.PKGoType}} ` + "`" + `json:"{{.PKDBName}}"` + "`" + `
 }
 {{- end}}
 {{end}}
@@ -367,6 +373,23 @@ func (r *Repository) {{.Name}}({{.Params}}) ({{$.EntityName}}, error) {
 {{- else if eq .Category "update"}}
 // {{.Name}} delegates to the store.
 func (r *Repository) {{.Name}}({{.Params}}) error {
+{{- if and .EventType .EventOutbox}}
+	evt := {{.EventAliasName}}{
+		BaseEvent: events.NewBaseEvent("{{.EventType}}"),
+		{{$.PKGoName}}: {{.EventPKExpr}},
+		Update: input,
+	}
+	payload, err := events.EncodeEvent(evt)
+	if err != nil {
+		return fmt.Errorf("{{.NameSpaced}}: encode outbox event: %w", err)
+	}
+	if err := r.store.{{.Name}}({{.CallArgs}}, events.OutboxEvent{
+		Type:    "{{.EventType}}",
+		Payload: payload,
+	}); err != nil {
+		return fmt.Errorf("{{.NameSpaced}}: %w", err)
+	}
+{{- else}}
 	if err := r.store.{{.Name}}({{.CallArgs}}); err != nil {
 		return fmt.Errorf("{{.NameSpaced}}: %w", err)
 	}
@@ -379,11 +402,31 @@ func (r *Repository) {{.Name}}({{.Params}}) error {
 		})
 	}
 {{- end}}
+{{- end}}
 	return nil
 }
 {{- else if eq .Category "exec"}}
 // {{.Name}} delegates to the store.
 func (r *Repository) {{.Name}}({{.Params}}) error {
+{{- if and .EventType .EventOutbox}}
+	evt := {{.EventAliasName}}{
+		BaseEvent: events.NewBaseEvent("{{.EventType}}"),
+		{{$.PKGoName}}: {{.EventPKExpr}},
+{{- if .EventIsDelete}}
+		Permanent: {{.EventPermanent}},
+{{- end}}
+	}
+	payload, err := events.EncodeEvent(evt)
+	if err != nil {
+		return fmt.Errorf("{{.NameSpaced}}: encode outbox event: %w", err)
+	}
+	if err := r.store.{{.Name}}({{.CallArgs}}, events.OutboxEvent{
+		Type:    "{{.EventType}}",
+		Payload: payload,
+	}); err != nil {
+		return fmt.Errorf("{{.NameSpaced}}: %w", err)
+	}
+{{- else}}
 	if err := r.store.{{.Name}}({{.CallArgs}}); err != nil {
 		return fmt.Errorf("{{.NameSpaced}}: %w", err)
 	}
@@ -392,9 +435,12 @@ func (r *Repository) {{.Name}}({{.Params}}) error {
 		r.bus.Emit(ctx, {{.EventAliasName}}{
 			BaseEvent: events.NewBaseEvent("{{.EventType}}"),
 			{{$.PKGoName}}: {{.EventPKExpr}},
+{{- if .EventIsDelete}}
 			Permanent: {{.EventPermanent}},
+{{- end}}
 		})
 	}
+{{- end}}
 {{- end}}
 	return nil
 }

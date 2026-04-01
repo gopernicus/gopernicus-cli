@@ -68,11 +68,21 @@ type EventsConfig struct {
 	// event_outbox table before delivery, guaranteeing at-least-once delivery
 	// across process restarts. Accepts "gopernicus" or a provider string.
 	Outbox Feature `yaml:"outbox,omitempty"`
+
+	// JobQueue enables the durable job queue: jobs are persisted to the
+	// job_queue table for at-least-once processing with retry and
+	// dead-lettering. Accepts "gopernicus" or a provider string.
+	JobQueue Feature `yaml:"job_queue,omitempty"`
 }
 
 // OutboxEnabled returns true if the event outbox pattern is configured.
 func (e *EventsConfig) OutboxEnabled() bool {
 	return e != nil && e.Outbox.Enabled()
+}
+
+// JobQueueEnabled returns true if the job queue is configured.
+func (e *EventsConfig) JobQueueEnabled() bool {
+	return e != nil && e.JobQueue.Enabled()
 }
 
 // DatabaseConfig defines a named database connection.

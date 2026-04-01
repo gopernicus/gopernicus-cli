@@ -331,7 +331,7 @@ func (s *Signer) Verify(token string) (map[string]any, error) {
 		CompliancePkg: "infrastructure/storage/storagetest",
 		ComplianceCall: "storagetest.RunSuite(t, {{var}})",
 		AdapterDir:    "infrastructure/storage",
-		SourceImports: []string{"context", "io"},
+		SourceImports: []string{"context", "io", "time"},
 		MethodStubs: `func (c *Client) Upload(ctx context.Context, path string, reader io.Reader) error {
 	// TODO: implement
 	return nil
@@ -365,6 +365,18 @@ func (c *Client) DownloadRange(ctx context.Context, path string, offset, length 
 func (c *Client) GetObjectSize(ctx context.Context, path string) (int64, error) {
 	// TODO: implement
 	return 0, nil
+}
+
+func (c *Client) InitiateResumableUpload(ctx context.Context, path, contentType string) (string, error) {
+	// TODO: implement
+	// Return storage.ErrResumableNotSupported if this backend does not support resumable uploads.
+	return "", nil
+}
+
+func (c *Client) SignedURL(ctx context.Context, path string, expiry time.Duration) (string, error) {
+	// TODO: implement
+	// Return storage.ErrSignedURLNotSupported if this backend does not support signed URLs.
+	return "", nil
 }`,
 	},
 

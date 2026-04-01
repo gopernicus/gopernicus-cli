@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gopernicus/gopernicus-cli/internal/fwsource"
 	"github.com/gopernicus/gopernicus-cli/internal/generators"
 	"github.com/gopernicus/gopernicus-cli/internal/manifest"
 	"github.com/gopernicus/gopernicus-cli/internal/project"
@@ -102,6 +103,9 @@ func runBootRepos(_ context.Context, args []string) error {
 		dbNames = m.DatabaseNames()
 	}
 
+	// Resolve framework source once for all tables.
+	fwSourceDir, _ := fwsource.ResolveDir() // empty on error; falls back to generic scaffold
+
 	var count int
 	for _, db := range dbNames {
 		dbConf := m.DatabaseOrDefault(db)
@@ -145,10 +149,10 @@ func runBootRepos(_ context.Context, args []string) error {
 					continue
 				}
 
-				if err := scaffoldRepoForTable(root, db, domain, table); err != nil {
+				if err := scaffoldRepoForTable(root, db, domain, table, fwSourceDir); err != nil {
 					return err
 				}
-				if err := scaffoldBridgeYMLForTable(root, domain, table); err != nil {
+				if err := scaffoldBridgeYMLForTable(root, domain, table, fwSourceDir); err != nil {
 					return err
 				}
 				count++

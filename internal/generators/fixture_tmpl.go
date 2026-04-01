@@ -13,7 +13,7 @@ import (
 {{- end}}
 
 	"{{.FrameworkPath}}/infrastructure/cryptids"
-	"{{.FrameworkPath}}/infrastructure/testing/testpgx"
+	"{{.FrameworkPath}}/workshop/testing/testpgx"
 	"{{.FrameworkPath}}/sdk/conversion"
 	"github.com/stretchr/testify/require"
 )

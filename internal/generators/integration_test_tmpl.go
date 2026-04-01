@@ -18,8 +18,8 @@ import (
 {{end}}
 	fixtures "{{.FixtureImport}}"
 
-	"github.com/gopernicus/gopernicus/infrastructure/testing/pgxfixtures"
-	"github.com/gopernicus/gopernicus/infrastructure/testing/testpgx"
+	"github.com/gopernicus/gopernicus/workshop/testing/pgxfixtures"
+	"github.com/gopernicus/gopernicus/workshop/testing/testpgx"
 {{if .HasList}}	"github.com/gopernicus/gopernicus/sdk/fop"
 {{end}}	"github.com/gopernicus/gopernicus/sdk/logger"
 )

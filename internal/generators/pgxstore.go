@@ -91,6 +91,10 @@ type StoreMethod struct {
 	IsSoftDelete bool
 	SkipRowCheck bool // from @check_rows: false — skip RowsAffected == 0 check
 
+	// EventOutbox: when true, the store method accepts variadic outbox events
+	// and wraps the query in InTx for atomic outbox persistence.
+	EventOutbox bool
+
 	// For list — named filters with placeholder substitution.
 	FilterTypeName      string
 	Filters             []StoreFilter    // one per named filter
@@ -132,6 +136,7 @@ type StoreTemplateData struct {
 	HasUpdate bool
 	HasFilter bool
 	HasList   bool
+	HasOutbox bool // any method uses @event ... outbox
 
 	Methods []StoreMethod
 }
@@ -264,10 +269,13 @@ func buildStoreData(resolved *ResolvedFile, domainName, modulePath string) (Stor
 
 	// NeedsTime when any method uses time.Now().UTC().
 	needsTime := hasUpdatedAt && hasUpdate
+	hasOutbox := false
 	for _, m := range methods {
 		if m.HasAppCreatedAt || m.HasAppUpdatedAt {
 			needsTime = true
-			break
+		}
+		if m.EventOutbox {
+			hasOutbox = true
 		}
 	}
 
@@ -288,6 +296,7 @@ func buildStoreData(resolved *ResolvedFile, domainName, modulePath string) (Stor
 		HasUpdate:       hasUpdate,
 		HasFilter:       hasFilter,
 		HasList:         hasList,
+		HasOutbox:       hasOutbox,
 		Methods:         methods,
 	}, nil
 }
@@ -580,6 +589,8 @@ func buildStoreMethod(
 	case "exec":
 		buildExecStoreMethod(&m, rq, resolved, allCols)
 	}
+
+	m.EventOutbox = rq.EventOutbox
 
 	return m
 }

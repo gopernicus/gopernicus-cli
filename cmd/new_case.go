@@ -167,7 +167,7 @@ package %s
 import (
 	"log/slog"
 
-	"github.com/gopernicus/gopernicus/bridge/protocol/httpmid"
+	"github.com/gopernicus/gopernicus/bridge/transit/httpmid"
 	"github.com/gopernicus/gopernicus/infrastructure/ratelimiter"
 	%s "%s/core/cases/%s"
 )
@@ -213,7 +213,7 @@ func New(
 			content: fmt.Sprintf(`package %s
 
 import (
-	"github.com/gopernicus/gopernicus/bridge/protocol/httpmid"
+	"github.com/gopernicus/gopernicus/bridge/transit/httpmid"
 	"github.com/gopernicus/gopernicus/sdk/web"
 )
 
