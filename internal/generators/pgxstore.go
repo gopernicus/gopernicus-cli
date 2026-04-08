@@ -338,7 +338,7 @@ func buildStoreParamList(rq ResolvedQuery, repoPkg, entityName, category string)
 
 	switch category {
 	case "list":
-		if rq.HasFilters {
+		if rq.HasFilters || (rq.HasSearch && len(rq.SearchFields) > 0) {
 			filterTypeName := "Filter" + rq.FuncName
 			params = append(params, "filter "+repoPkg+"."+filterTypeName)
 		}
@@ -401,7 +401,7 @@ func buildStoreReturnType(rq ResolvedQuery, repoPkg, entityName, category string
 // ─── per-category method builders ────────────────────────────────────────────
 
 func buildListStoreMethod(m *StoreMethod, rq ResolvedQuery, resolved *ResolvedFile, allCols string) {
-	m.HasFilters = rq.HasFilters
+	m.HasFilters = rq.HasFilters || (rq.HasSearch && len(rq.SearchFields) > 0)
 	m.HasOrder = rq.HasOrder
 	m.HasLimit = rq.HasLimit
 
@@ -412,9 +412,13 @@ func buildListStoreMethod(m *StoreMethod, rq ResolvedQuery, resolved *ResolvedFi
 	m.HasBaseWhere = strings.Contains(strings.ToUpper(m.BaseSQL), " WHERE ")
 	m.BaseArgs = buildNamedArgList(rq.Params)
 
-	if rq.HasFilters {
+	// FilterTypeName is needed when the method accepts a filter param
+	// (either from named filters or search).
+	if m.HasFilters {
 		m.FilterTypeName = "Filter" + rq.FuncName
+	}
 
+	if rq.HasFilters {
 		// Build one StoreFilter per named filter.
 		for _, rf := range rq.ResolvedFilters {
 			sf := StoreFilter{
@@ -437,15 +441,16 @@ func buildListStoreMethod(m *StoreMethod, rq ResolvedQuery, resolved *ResolvedFi
 			}
 			m.Filters = append(m.Filters, sf)
 		}
+	}
 
-		for _, f := range rq.SearchFields {
-			m.SearchFields = append(m.SearchFields, SearchFieldInfo{DBName: f.DBName, QualifiedName: f.QualifiedName})
-		}
-		m.SearchType = rq.SearchType
-		m.HasSearch = rq.HasSearch && len(rq.SearchFields) > 0
-		if m.HasSearch {
-			m.GenSearchFunc = "generatedApply" + rq.FuncName + "SearchFilter"
-		}
+	// Search can be used with or without named filters (@filter:conditions).
+	for _, f := range rq.SearchFields {
+		m.SearchFields = append(m.SearchFields, SearchFieldInfo{DBName: f.DBName, QualifiedName: f.QualifiedName})
+	}
+	m.SearchType = rq.SearchType
+	m.HasSearch = rq.HasSearch && len(rq.SearchFields) > 0
+	if m.HasSearch {
+		m.GenSearchFunc = "generatedApply" + rq.FuncName + "SearchFilter"
 	}
 
 	// Custom return type for lists with explicit SELECT containing non-entity columns.

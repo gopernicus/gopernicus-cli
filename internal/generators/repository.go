@@ -338,7 +338,9 @@ func buildRepoTemplateData(resolved *ResolvedFile) (RepoTemplateData, error) {
 		if rq.HasFilters || rq.HasOrder || rq.HasLimit {
 			hasList = true
 		}
-		if rq.HasFilters {
+		// A filter struct is needed when the query has named filters OR search.
+		needsFilter := rq.HasFilters || (rq.HasSearch && len(rq.SearchFields) > 0)
+		if needsFilter {
 			hasFilter = true
 
 			var filterFields []RepoFieldInfo
@@ -523,13 +525,13 @@ func buildRepoMethods(resolved *ResolvedFile) ([]MethodSig, error) {
 		case rq.HasFilters || rq.HasOrder || rq.HasLimit:
 			m.IsListFunc = true
 			m.Category = "list"
-			m.HasFilters = rq.HasFilters
+			m.HasFilters = rq.HasFilters || (rq.HasSearch && len(rq.SearchFields) > 0)
 			m.HasOrder = rq.HasOrder
 			m.HasLimit = rq.HasLimit
 			m.MaxLimit = rq.MaxLimit
 			callArgs = []string{"ctx"}
 
-			if rq.HasFilters {
+			if m.HasFilters {
 				m.FilterTypeName = "Filter" + rq.FuncName
 				params = append(params, "filter Filter"+rq.FuncName)
 				callArgs = append(callArgs, "filter")

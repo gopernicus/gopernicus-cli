@@ -287,20 +287,25 @@ func BridgeYMLToBridgeRoutes(yml *BridgeYML, resolved *ResolvedFile) ([]BridgeRo
 			method = strings.ToUpper(yr.Method)
 		}
 
+		pathParams := extractPathParams(yr.Path, rq)
+
+		hasFilters := rq.HasFilters || (rq.HasSearch && len(rq.SearchFields) > 0)
+
 		br := BridgeRoute{
 			Method:          method,
 			Path:            yr.Path,
 			FuncName:        yr.Func,
 			HandlerName:     handlerName,
 			Category:        category,
-			HasFilters:      rq.HasFilters,
+			HasFilters:      hasFilters,
 			HasOrder:        rq.HasOrder,
 			MaxLimit:        rq.MaxLimit,
-			PathParams:      extractPathParams(yr.Path, rq),
+			PathParams:      pathParams,
+			RepoCallParams:  reorderPathParamsForRepo(pathParams, rq.Params),
 			WithPermissions: yr.WithPermissions,
 		}
 
-		if rq.HasFilters {
+		if hasFilters {
 			br.FilterTypeName = "Filter" + rq.FuncName
 		}
 
@@ -382,6 +387,36 @@ func BridgeYMLToBridgeRoutes(yml *BridgeYML, resolved *ResolvedFile) ([]BridgeRo
 	}
 
 	return routes, nil
+}
+
+// reorderPathParamsForRepo reorders path params to match the repo function's
+// parameter order (derived from SQL @param order). Params not in queryParams
+// are appended at the end to avoid dropping them.
+func reorderPathParamsForRepo(pathParams []PathParam, queryParams []string) []PathParam {
+	paramMap := make(map[string]PathParam, len(pathParams))
+	for _, p := range pathParams {
+		paramMap[p.Name] = p
+	}
+
+	seen := make(map[string]bool)
+	var reordered []PathParam
+
+	// Add in query param order (those that are also path params).
+	for _, qp := range queryParams {
+		if pp, ok := paramMap[qp]; ok && !seen[qp] {
+			seen[qp] = true
+			reordered = append(reordered, pp)
+		}
+	}
+
+	// Append any remaining path params not in query params.
+	for _, p := range pathParams {
+		if !seen[p.Name] {
+			reordered = append(reordered, p)
+		}
+	}
+
+	return reordered
 }
 
 func findResolvedQuery(resolved *ResolvedFile, funcName string) (ResolvedQuery, bool) {

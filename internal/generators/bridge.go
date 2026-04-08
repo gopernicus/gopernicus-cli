@@ -265,6 +265,15 @@ var bridgeFuncs = template.FuncMap{
 		}
 		return ref
 	},
+	// subjectParam extracts the raw param name from a subject reference.
+	// "tenant:tenant_id" → "tenant_id"
+	"subjectParam": func(ref string) string {
+		parts := strings.SplitN(ref, ":", 2)
+		if len(parts) == 2 {
+			return parts[1]
+		}
+		return ref
+	},
 }
 
 func renderBridgeTemplate(tmplText string, data BridgeTemplateData) ([]byte, error) {
