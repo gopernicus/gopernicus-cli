@@ -24,6 +24,7 @@ type ParentFixture struct {
 	IsSelfReference        bool   // FK references same table
 	IsPrincipalInheritance bool   // PK is FK to principals table
 	IsInBatch              bool   // parent table has a fixture in this generation batch
+	ForwardParams          []ParentFixture // external params to forward when calling this in-batch parent's WithDefaults
 }
 
 // FixtureEntity describes a single entity for fixture generation.
@@ -48,6 +49,11 @@ type FixtureEntity struct {
 
 	// ParentFixtures are FK dependencies (other entities that must exist first).
 	ParentFixtures []ParentFixture
+
+	// AllExternalParams is the transitive closure of out-of-batch FK params:
+	// own out-of-batch parents + all in-batch ancestors' out-of-batch parents.
+	// These become parameters on the WithDefaults signature.
+	AllExternalParams []ParentFixture
 
 	// HasPrincipalInheritance is true if PK is a FK to the principals table.
 	HasPrincipalInheritance bool
@@ -276,6 +282,49 @@ func topologicalSortEntities(entities []FixtureEntity, graph map[string][]string
 	return sorted, nil
 }
 
+// ─── transitive external params ────────────────────────────────────────────
+
+// computeTransitiveExternalParams walks the topo-sorted entities (parents first)
+// and computes AllExternalParams for each entity: own out-of-batch parents plus
+// all in-batch ancestors' out-of-batch parents. It also sets ForwardParams on
+// each in-batch ParentFixture so the template knows what to pass.
+func computeTransitiveExternalParams(entities []FixtureEntity) {
+	entityByTable := make(map[string]*FixtureEntity, len(entities))
+	for i := range entities {
+		entityByTable[entities[i].TableName] = &entities[i]
+	}
+
+	for i := range entities {
+		e := &entities[i]
+		seen := make(map[string]bool)
+
+		// Own out-of-batch parents first.
+		for _, p := range e.ParentFixtures {
+			if !p.IsSelfReference && !p.IsPrincipalInheritance && !p.IsInBatch {
+				if !seen[p.VarName] {
+					seen[p.VarName] = true
+					e.AllExternalParams = append(e.AllExternalParams, p)
+				}
+			}
+		}
+
+		// Inherit from in-batch parents (already computed since topo-sorted).
+		for j, p := range e.ParentFixtures {
+			if !p.IsSelfReference && !p.IsPrincipalInheritance && p.IsInBatch {
+				if parent, ok := entityByTable[p.TableName]; ok {
+					e.ParentFixtures[j].ForwardParams = parent.AllExternalParams
+					for _, tp := range parent.AllExternalParams {
+						if !seen[tp.VarName] {
+							seen[tp.VarName] = true
+							e.AllExternalParams = append(e.AllExternalParams, tp)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
 // ─── generation ─────────────────────────────────────────────────────────────
 
 // GenerateFixtures produces the test fixtures file for all entities in a domain.
@@ -302,6 +351,9 @@ func GenerateFixtures(data FixtureTemplateData, fixtureDir string, opts Options)
 		return err
 	}
 	data.Entities = sorted
+
+	// Compute transitive external params bottom-up (topo order: parents first).
+	computeTransitiveExternalParams(data.Entities)
 
 	// Collect unique imports.
 	data.Imports = collectFixtureImports(data.Entities)

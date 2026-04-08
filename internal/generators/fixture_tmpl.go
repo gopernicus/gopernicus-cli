@@ -82,10 +82,10 @@ func CreateTest{{$e.EntityName}}(t *testing.T, ctx context.Context, db *testpgx.
 
 // CreateTest{{$e.EntityName}}WithDefaults creates a test {{$e.EntityName}} with auto-created FK dependencies.
 // FK dependencies whose parent table is outside this generation batch are required as parameters.
-func CreateTest{{$e.EntityName}}WithDefaults(t *testing.T, ctx context.Context, db *testpgx.TestPGX{{range outOfBatchParents $e.ParentFixtures}}, {{.VarName}} string{{end}}) {{$e.RepoPkg}}.{{$e.EntityName}} {
+func CreateTest{{$e.EntityName}}WithDefaults(t *testing.T, ctx context.Context, db *testpgx.TestPGX{{range $e.AllExternalParams}}, {{.VarName}} string{{end}}) {{$e.RepoPkg}}.{{$e.EntityName}} {
 	t.Helper()
 {{range inBatchParents $e.ParentFixtures}}
-	parent{{.EntityName}} := CreateTest{{.EntityName}}WithDefaults(t, ctx, db)
+	parent{{.EntityName}} := CreateTest{{.EntityName}}WithDefaults(t, ctx, db{{range .ForwardParams}}, {{.VarName}}{{end}})
 	{{.VarName}} := parent{{.EntityName}}.{{.PKGoName}}
 {{end}}
 	return CreateTest{{$e.EntityName}}(t, ctx, db{{range nonSelfRefParents $e.ParentFixtures}}, {{.VarName}}{{end}})

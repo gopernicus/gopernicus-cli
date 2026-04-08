@@ -95,19 +95,18 @@ func (b *Bridge) {{.HandlerName}}(w http.ResponseWriter, r *http.Request) {
 	}
 {{end}}
 {{- if and .Authorize (eq .Authorize.Pattern "prefilter")}}
-	// Prefilter: resolve which specific IDs this subject can read.
 {{- if .Authorize.SubjectRef}}
-	prefilterResult, err := b.authorizer.LookupResources(r.Context(), authorization.Subject{
-		Type: "{{subjectType .Authorize.SubjectRef}}",
-		ID:   {{subjectIDExpr .Authorize.SubjectRef}},
-	}, "{{.Authorize.Permission}}", "{{$.EntitySingular}}")
+	// Prefilter with resource-scoped subject: access is enforced by route-level
+	// AuthorizeParam middleware and the repository's scoping parameter ({{subjectParam .Authorize.SubjectRef}}).
+	// LookupResources is not needed — it cannot resolve Through-based permissions
+	// when the subject is a resource type rather than a principal.
 {{- else}}
+	// Prefilter: resolve which specific IDs this subject can read.
 	subject := httpmid.GetSubjectInfo(r.Context())
 	prefilterResult, err := b.authorizer.LookupResources(r.Context(), authorization.Subject{
 		Type: subject.Type,
 		ID:   subject.ID,
 	}, "{{.Authorize.Permission}}", "{{$.EntitySingular}}")
-{{- end}}
 	if err != nil {
 		b.log.ErrorContext(r.Context(), "prefilter authorization", "error", err)
 		web.RespondJSONError(w, web.ErrInternal("authorization error"))
@@ -117,29 +116,31 @@ func (b *Bridge) {{.HandlerName}}(w http.ResponseWriter, r *http.Request) {
 		filter.AuthorizedIDs = prefilterResult.IDs
 	}
 {{- end}}
+{{- end}}
 
 {{- if and .Authorize (eq .Authorize.Pattern "postfilter")}}
-	// Postfilter: loop-until-full with batch authorization check.
 {{- if .Authorize.SubjectRef}}
-	postfilterSubject := authorization.Subject{
-		Type: "{{subjectType .Authorize.SubjectRef}}",
-		ID:   {{subjectIDExpr .Authorize.SubjectRef}},
-	}
+	// Postfilter with resource-scoped subject: access is enforced by route-level
+	// AuthorizeParam middleware and the repository's scoping parameter.
+	// PostfilterLoop is skipped — it cannot resolve Through-based permissions
+	// when the subject is a resource type rather than a principal.
+	records, pagination, err := b.{{$.EntityNameLower}}Repository.{{.FuncName}}(r.Context(), filter, {{range .RepoCallParams}}{{.GoName}}, {{end}}orderBy, page)
 {{- else}}
+	// Postfilter: loop-until-full with batch authorization check.
 	postfilterSubjectInfo := httpmid.GetSubjectInfo(r.Context())
 	postfilterSubject := authorization.Subject{Type: postfilterSubjectInfo.Type, ID: postfilterSubjectInfo.ID}
-{{- end}}
 	records, pagination, err := fopb.PostfilterLoop(
 		r.Context(), b.authorizer, postfilterSubject,
 		"{{.Authorize.Permission}}", "{{$.EntitySingular}}",
 		func(rec {{$.RepoPackage}}.{{$.EntityName}}) string { return rec.{{$.PKGoName}} },
 		func(ctx context.Context, p fop.PageStringCursor) ([]{{$.RepoPackage}}.{{$.EntityName}}, fop.Pagination, error) {
-			return b.{{$.EntityNameLower}}Repository.{{.FuncName}}(ctx, filter, {{range .PathParams}}{{.GoName}}, {{end}}orderBy, p)
+			return b.{{$.EntityNameLower}}Repository.{{.FuncName}}(ctx, filter, {{range .RepoCallParams}}{{.GoName}}, {{end}}orderBy, p)
 		},
 		page,
 	)
+{{- end}}
 {{- else}}
-	records, pagination, err := b.{{$.EntityNameLower}}Repository.{{.FuncName}}(r.Context(), filter, {{range .PathParams}}{{.GoName}}, {{end}}orderBy, page)
+	records, pagination, err := b.{{$.EntityNameLower}}Repository.{{.FuncName}}(r.Context(), filter, {{range .RepoCallParams}}{{.GoName}}, {{end}}orderBy, page)
 {{- end}}
 	if err != nil {
 		if !errs.IsExpected(err) {
@@ -217,7 +218,7 @@ func (b *Bridge) {{.HandlerName}}(w http.ResponseWriter, r *http.Request) {
 	}
 {{- if eq .Category "update_returning"}}
 
-	record, err := b.{{$.EntityNameLower}}Repository.{{.FuncName}}(r.Context(), {{range .PathParams}}{{.GoName}}, {{end}}input)
+	record, err := b.{{$.EntityNameLower}}Repository.{{.FuncName}}(r.Context(), {{range .RepoCallParams}}{{.GoName}}, {{end}}input)
 	if err != nil {
 		if !errs.IsExpected(err) {
 			b.log.ErrorContext(r.Context(), "unexpected error", "error", err)
@@ -229,7 +230,7 @@ func (b *Bridge) {{.HandlerName}}(w http.ResponseWriter, r *http.Request) {
 	web.RespondJSONOK(w, fopb.RecordResponse[{{$.RepoPackage}}.{{$.EntityName}}]{Record: record})
 {{- else}}
 
-	if err := b.{{$.EntityNameLower}}Repository.{{.FuncName}}(r.Context(), {{range .PathParams}}{{.GoName}}, {{end}}input); err != nil {
+	if err := b.{{$.EntityNameLower}}Repository.{{.FuncName}}(r.Context(), {{range .RepoCallParams}}{{.GoName}}, {{end}}input); err != nil {
 		if !errs.IsExpected(err) {
 			b.log.ErrorContext(r.Context(), "unexpected error", "error", err)
 		}
@@ -248,7 +249,7 @@ func (b *Bridge) {{.HandlerName}}(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 {{end}}
-	record, err := b.{{$.EntityNameLower}}Repository.{{.FuncName}}(r.Context(), {{range $i, $p := .PathParams}}{{if $i}}, {{end}}{{$p.GoName}}{{end}})
+	record, err := b.{{$.EntityNameLower}}Repository.{{.FuncName}}(r.Context(), {{range $i, $p := .RepoCallParams}}{{if $i}}, {{end}}{{$p.GoName}}{{end}})
 	if err != nil {
 		if !errs.IsExpected(err) {
 			b.log.ErrorContext(r.Context(), "unexpected error", "error", err)
@@ -303,7 +304,7 @@ func (b *Bridge) {{.HandlerName}}(w http.ResponseWriter, r *http.Request) {
 	}
 
 {{- end}}
-	if err := b.{{$.EntityNameLower}}Repository.{{.FuncName}}(r.Context(), {{range $i, $p := .PathParams}}{{if $i}}, {{end}}{{$p.GoName}}{{end}}); err != nil {
+	if err := b.{{$.EntityNameLower}}Repository.{{.FuncName}}(r.Context(), {{range $i, $p := .RepoCallParams}}{{if $i}}, {{end}}{{$p.GoName}}{{end}}); err != nil {
 		if !errs.IsExpected(err) {
 			b.log.ErrorContext(r.Context(), "unexpected error", "error", err)
 		}
@@ -570,9 +571,17 @@ func (b *Bridge) addGeneratedRoutes(group *web.RouteGroup) {
 {{- end}}
 {{- else if .Authorize}}
 {{- if eq .Authorize.Pattern "prefilter"}}
+{{- if .Authorize.Subject}}
+		httpmid.AuthorizeParam(b.authorizer, b.log, b.jsonErrors, "{{subjectType .Authorize.Subject}}", "{{.Authorize.Permission}}", "{{subjectParam .Authorize.Subject}}"),
+{{- else}}
 		httpmid.AuthorizeType(b.authorizer, b.log, b.jsonErrors, "{{if .Authorize.Entity}}{{.Authorize.Entity}}{{else}}{{$.EntitySingular}}{{end}}", "list"),
+{{- end}}
 {{- else if eq .Authorize.Pattern "postfilter"}}
+{{- if .Authorize.Subject}}
+		httpmid.AuthorizeParam(b.authorizer, b.log, b.jsonErrors, "{{subjectType .Authorize.Subject}}", "{{.Authorize.Permission}}", "{{subjectParam .Authorize.Subject}}"),
+{{- else}}
 		httpmid.AuthorizeType(b.authorizer, b.log, b.jsonErrors, "{{if .Authorize.Entity}}{{.Authorize.Entity}}{{else}}{{$.EntitySingular}}{{end}}", "list"),
+{{- end}}
 {{- else}}
 		httpmid.AuthorizeParam(b.authorizer, b.log, b.jsonErrors, "{{if .Authorize.Entity}}{{.Authorize.Entity}}{{else}}{{$.EntitySingular}}{{end}}", "{{.Authorize.Permission}}", "{{.Authorize.Param}}"),
 {{- end}}

@@ -130,8 +130,12 @@ type BridgeRoute struct {
 	MaxLimit       int
 	FilterTypeName string // from repo generated code, e.g. "FilterList"
 
-	// For handlers that read path params
+	// For handlers that read path params (URL order, used for extraction)
 	PathParams []PathParam
+
+	// RepoCallParams is PathParams reordered to match the repo function's
+	// parameter order (from SQL @param order). Used when calling repo methods.
+	RepoCallParams []PathParam
 
 	// For create/update handlers
 	HasBody bool

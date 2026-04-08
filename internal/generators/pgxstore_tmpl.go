@@ -365,9 +365,9 @@ func (s *Store) {{.FuncName}}({{.Params}}) {{.Returns}} {
 {{- range .Filters}}
 	baseSQL = replaceFilterPlaceholder(baseSQL, "${{.PlaceholderName}}", {{.GenFuncName}}(filter, data))
 {{- end}}
+{{- end}}
 {{- if .HasSearch}}
 	baseSQL = replaceFilterPlaceholder(baseSQL, "$search", {{.GenSearchFunc}}(filter, data))
-{{- end}}
 {{- end}}
 
 	buf := bytes.NewBufferString(baseSQL)
