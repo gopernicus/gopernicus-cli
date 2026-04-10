@@ -327,6 +327,7 @@ func BridgeYMLToBridgeRoutes(yml *BridgeYML, resolved *ResolvedFile) ([]BridgeRo
 					Permission: mw.Authorize.Permission,
 					Param:      mw.Authorize.Param,
 					SubjectRef: mw.Authorize.Subject,
+					Entity:     mw.Authorize.Entity,
 				}
 			}
 			if mw.Authenticate != "" {

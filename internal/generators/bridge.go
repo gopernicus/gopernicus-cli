@@ -250,6 +250,11 @@ var bridgeFuncs = template.FuncMap{
 		}
 		return false
 	},
+	// paramToResource derives a resource type from a path param name by stripping
+	// the "_id" suffix. "space_id" → "space", "tenant_id" → "tenant".
+	"paramToResource": func(param string) string {
+		return strings.TrimSuffix(param, "_id")
+	},
 	// subjectType extracts the type part of a subject reference.
 	// "tenant:tenant_id" → "tenant"
 	"subjectType": func(ref string) string {
