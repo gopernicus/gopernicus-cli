@@ -206,6 +206,11 @@ type AuthorizeSpec struct {
 	// Empty means "use authenticated subject from context".
 	// e.g. "tenant:tenant_id" means subject is tenant:{tenant_id} from URL param.
 	SubjectRef string
+
+	// Entity overrides the resource type used in AuthorizeParam/AuthorizeType.
+	// When empty, the generator derives it from Param (stripping "_id") or falls
+	// back to the bridge entity singular name.
+	Entity string
 }
 
 // AuthCreateRel represents a parsed relationship creation from @auth.create.
