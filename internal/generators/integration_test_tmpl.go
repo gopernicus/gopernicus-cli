@@ -48,7 +48,7 @@ func TestGenerated{{.EntityName}}Store_Create(t *testing.T) {
 	ctx, db, store := setupTestStore(t)
 	pgxfixtures.TruncatePublicSchema(t, ctx, db.Pool)
 
-	created := fixtures.CreateTest{{.EntityName}}(t, ctx, db)
+	created := fixtures.CreateTest{{.EntityName}}WithDefaults(t, ctx, db)
 
 	// Verify the record was created and can be retrieved.
 	result, err := store.Get(ctx, created.{{.PKGoName}})
@@ -60,7 +60,7 @@ func TestGenerated{{.EntityName}}Store_Get(t *testing.T) {
 	ctx, db, store := setupTestStore(t)
 	pgxfixtures.TruncatePublicSchema(t, ctx, db.Pool)
 
-	created := fixtures.CreateTest{{.EntityName}}(t, ctx, db)
+	created := fixtures.CreateTest{{.EntityName}}WithDefaults(t, ctx, db)
 
 	t.Run("found", func(t *testing.T) {
 		result, err := store.Get(ctx, created.{{.PKGoName}})
@@ -81,7 +81,7 @@ func TestGenerated{{.EntityName}}Store_List(t *testing.T) {
 	// Create multiple records.
 	const numRecords = 3
 	for i := 0; i < numRecords; i++ {
-		fixtures.CreateTest{{.EntityName}}(t, ctx, db)
+		fixtures.CreateTest{{.EntityName}}WithDefaults(t, ctx, db)
 	}
 
 	t.Run("returns all records", func(t *testing.T) {
@@ -119,7 +119,7 @@ func TestGenerated{{.EntityName}}Store_Delete(t *testing.T) {
 	ctx, db, store := setupTestStore(t)
 	pgxfixtures.TruncatePublicSchema(t, ctx, db.Pool)
 
-	created := fixtures.CreateTest{{.EntityName}}(t, ctx, db)
+	created := fixtures.CreateTest{{.EntityName}}WithDefaults(t, ctx, db)
 
 	err := store.Delete(ctx, created.{{.PKGoName}})
 	require.NoError(t, err)
@@ -133,7 +133,7 @@ func TestGenerated{{.EntityName}}Store_SoftDelete(t *testing.T) {
 	ctx, db, store := setupTestStore(t)
 	pgxfixtures.TruncatePublicSchema(t, ctx, db.Pool)
 
-	created := fixtures.CreateTest{{.EntityName}}(t, ctx, db)
+	created := fixtures.CreateTest{{.EntityName}}WithDefaults(t, ctx, db)
 
 	err := store.SoftDelete(ctx, created.{{.PKGoName}})
 	require.NoError(t, err)
