@@ -40,7 +40,9 @@ type BridgeTemplateData struct {
 	// Auth relationship creation — true when any Create route has @auth.create.
 	HasCreateRels bool
 
-	// All create rels across all Create queries (for createAuthRelationships method).
+	// Deprecated: per-route rels are now emitted via per-Route CreateRels in the
+	// generated.go template (one createAuthRelationships{FuncName} method per
+	// create route). Retained for backward compat with any downstream consumers.
 	AllCreateRels []BridgeCreateRel
 
 	// Auth relationship cleanup — true when any Delete/HardDelete route exists
@@ -134,8 +136,16 @@ type BridgeRoute struct {
 	PathParams []PathParam
 
 	// RepoCallParams is PathParams reordered to match the repo function's
-	// parameter order (from SQL @param order). Used when calling repo methods.
+	// parameter order (from SQL @param order), filtered to only params the
+	// repo function actually accepts. Used when calling repo methods.
 	RepoCallParams []PathParam
+
+	// HandlerPathParams is the subset of PathParams that the handler body
+	// actually references as a local variable. Used to drive the path-param
+	// extraction loop so locals that are not consumed (e.g., scoping segments
+	// in the URL that are not SQL params nor ParamsToInput) are not extracted
+	// and do not trigger "declared and not used" compile errors.
+	HandlerPathParams []PathParam
 
 	// For create/update handlers
 	HasBody bool
@@ -211,6 +221,12 @@ type PathParam struct {
 	GoName      string // "tenantID" (camelCase for local var)
 	GoFieldName string // "TenantID" (PascalCase for struct field)
 	GoType      string // "string"
+
+	// TargetIsPointer is true when this param is consumed by ParamsToInput and
+	// the corresponding field on the repo input struct is a pointer (e.g. a
+	// nullable self-referential parent FK). Drives the create/update handler
+	// template to emit `input.X = &localID` instead of `input.X = localID`.
+	TargetIsPointer bool
 }
 
 // ExplicitParam represents an explicit parameter that the repo function expects

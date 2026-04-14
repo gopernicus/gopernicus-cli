@@ -278,3 +278,133 @@ func TestParseCompactAuthRel(t *testing.T) {
 		}
 	}
 }
+
+// TestReorderPathParamsForRepo_FiltersNonQueryParams asserts that path params
+// not referenced by the SQL query's named-param set are dropped, not appended.
+// Regression: previously, URL scoping segments like {space_id} leaked into the
+// repo call argument list when the query's WHERE clause only used {tenant_id}
+// and {dashboard_id}, producing "too many arguments" compile errors in the
+// generated bridge.
+func TestReorderPathParamsForRepo_FiltersNonQueryParams(t *testing.T) {
+	pathParams := []PathParam{
+		{Name: "tenant_id", GoName: "tenantID"},
+		{Name: "space_id", GoName: "spaceID"},
+		{Name: "dashboard_id", GoName: "dashboardID"},
+		{Name: "assignment_id", GoName: "assignmentID"},
+	}
+	queryParams := []string{"tenant_id", "dashboard_id"}
+
+	got := reorderPathParamsForRepo(pathParams, queryParams)
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 repo call params, got %d: %+v", len(got), got)
+	}
+	if got[0].Name != "tenant_id" || got[1].Name != "dashboard_id" {
+		t.Errorf("unexpected order/content: %+v", got)
+	}
+	for _, p := range got {
+		if p.Name == "space_id" || p.Name == "assignment_id" {
+			t.Errorf("non-query param %q leaked into repo call args", p.Name)
+		}
+	}
+}
+
+// TestReorderPathParamsForRepo_FollowsQueryOrder ensures the reorder still
+// matches SQL @param declaration order even when URL order differs.
+func TestReorderPathParamsForRepo_FollowsQueryOrder(t *testing.T) {
+	pathParams := []PathParam{
+		{Name: "tenant_id"},
+		{Name: "dashboard_id"},
+	}
+	queryParams := []string{"dashboard_id", "tenant_id"}
+
+	got := reorderPathParamsForRepo(pathParams, queryParams)
+
+	if len(got) != 2 || got[0].Name != "dashboard_id" || got[1].Name != "tenant_id" {
+		t.Errorf("expected SQL-ordered [dashboard_id, tenant_id], got %+v", got)
+	}
+}
+
+// TestComputeHandlerPathParams_UnionCoverage asserts that locals needed by
+// params_to_input, repo-call args, or delete-cleanup are kept, and orphans
+// are dropped so the handler doesn't emit "declared and not used".
+func TestComputeHandlerPathParams_UnionCoverage(t *testing.T) {
+	pathParams := []PathParam{
+		{Name: "tenant_id"},
+		{Name: "parent_space_id"},
+		{Name: "unused_scope"},
+		{Name: "space_id"},
+	}
+	repoCall := []PathParam{{Name: "tenant_id"}}
+	paramsToInput := []PathParam{{Name: "parent_space_id"}}
+
+	got := computeHandlerPathParams(pathParams, repoCall, paramsToInput, true, "space_id")
+
+	want := map[string]bool{
+		"tenant_id":       true, // repo call
+		"parent_space_id": true, // params_to_input
+		"space_id":        true, // delete cleanup PK
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d params, got %d: %+v", len(want), len(got), got)
+	}
+	for _, p := range got {
+		if !want[p.Name] {
+			t.Errorf("unexpected param %q in handler extraction set", p.Name)
+		}
+	}
+	for _, p := range got {
+		if p.Name == "unused_scope" {
+			t.Error("orphan path param was not dropped")
+		}
+	}
+}
+
+// TestComputeHandlerPathParams_PreservesURLOrder ensures the returned slice
+// keeps the original URL order for readable handler output.
+func TestComputeHandlerPathParams_PreservesURLOrder(t *testing.T) {
+	pathParams := []PathParam{
+		{Name: "tenant_id"},
+		{Name: "parent_space_id"},
+		{Name: "space_id"},
+	}
+	repoCall := []PathParam{{Name: "space_id"}, {Name: "tenant_id"}}
+	paramsToInput := []PathParam{{Name: "parent_space_id"}}
+
+	got := computeHandlerPathParams(pathParams, repoCall, paramsToInput, false, "")
+
+	if len(got) != 3 {
+		t.Fatalf("expected 3, got %d: %+v", len(got), got)
+	}
+	if got[0].Name != "tenant_id" || got[1].Name != "parent_space_id" || got[2].Name != "space_id" {
+		t.Errorf("expected URL-ordered result, got %+v", got)
+	}
+}
+
+// TestParamsToInputTargetFields_CoversInsertAndSet asserts that the helper
+// used to detect pointer target fields reads both InsertFields (for create)
+// and SetFields (for update), so a pointer FK on an update path is also
+// wrapped with & in the generated assignment.
+func TestParamsToInputTargetFields_CoversInsertAndSet(t *testing.T) {
+	rq := ResolvedQuery{
+		InsertFields: []FieldInfo{
+			{DBName: "name", GoType: "string"},
+			{DBName: "parent_space_id", GoType: "*string"},
+		},
+		SetFields: []FieldInfo{
+			{DBName: "description", GoType: "*string"},
+		},
+	}
+
+	got := paramsToInputTargetFields(rq)
+
+	if got["parent_space_id"] != "*string" {
+		t.Errorf("expected parent_space_id *string, got %q", got["parent_space_id"])
+	}
+	if got["description"] != "*string" {
+		t.Errorf("expected description *string, got %q", got["description"])
+	}
+	if got["name"] != "string" {
+		t.Errorf("expected name string, got %q", got["name"])
+	}
+}

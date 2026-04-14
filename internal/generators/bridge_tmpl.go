@@ -87,7 +87,7 @@ func (b *Bridge) {{.HandlerName}}(w http.ResponseWriter, r *http.Request) {
 		web.RespondJSONError(w, web.ErrBadRequest("invalid order: " + err.Error()))
 		return
 	}
-{{range .PathParams}}
+{{range .HandlerPathParams}}
 	{{.GoName}} := web.Param(r, "{{.Name}}")
 	if {{.GoName}} == "" {
 		web.RespondJSONError(w, web.ErrBadRequest("{{.Name}} is required"))
@@ -156,7 +156,7 @@ func (b *Bridge) {{.HandlerName}}(w http.ResponseWriter, r *http.Request) {
 	})
 
 {{- else if eq .Category "create"}}
-{{range .PathParams}}
+{{range .HandlerPathParams}}
 	{{.GoName}} := web.Param(r, "{{.Name}}")
 	if {{.GoName}} == "" {
 		web.RespondJSONError(w, web.ErrBadRequest("{{.Name}} is required"))
@@ -175,7 +175,7 @@ func (b *Bridge) {{.HandlerName}}(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 {{range .ParamsToInput}}
-	input.{{.GoFieldName}} = {{.GoName}}
+	input.{{.GoFieldName}} = {{if .TargetIsPointer}}&{{end}}{{.GoName}}
 {{- end}}
 
 	record, err := b.{{$.EntityNameLower}}Repository.{{.FuncName}}(r.Context(), input)
@@ -188,7 +188,7 @@ func (b *Bridge) {{.HandlerName}}(w http.ResponseWriter, r *http.Request) {
 	}
 {{- if .CreateRels}}
 
-	if err := b.createAuthRelationships(r.Context(), record); err != nil {
+	if err := b.createAuthRelationships{{.FuncName}}(r.Context(), record); err != nil {
 		b.log.ErrorContext(r.Context(), "create auth relationships", "error", err)
 		web.RespondJSONError(w, web.ErrInternal("create auth relationships"))
 		return
@@ -198,7 +198,7 @@ func (b *Bridge) {{.HandlerName}}(w http.ResponseWriter, r *http.Request) {
 	web.RespondJSONCreated(w, fopb.RecordResponse[{{$.RepoPackage}}.{{$.EntityName}}]{Record: record})
 
 {{- else if or (eq .Category "update") (eq .Category "update_returning")}}
-{{range .PathParams}}
+{{range .HandlerPathParams}}
 	{{.GoName}} := web.Param(r, "{{.Name}}")
 	if {{.GoName}} == "" {
 		web.RespondJSONError(w, web.ErrBadRequest("{{.Name}} is required"))
@@ -242,7 +242,7 @@ func (b *Bridge) {{.HandlerName}}(w http.ResponseWriter, r *http.Request) {
 {{- end}}
 
 {{- else if eq .Category "scan_one"}}
-{{range .PathParams}}
+{{range .HandlerPathParams}}
 	{{.GoName}} := web.Param(r, "{{.Name}}")
 	if {{.GoName}} == "" {
 		web.RespondJSONError(w, web.ErrBadRequest("{{.Name}} is required"))
@@ -289,7 +289,7 @@ func (b *Bridge) {{.HandlerName}}(w http.ResponseWriter, r *http.Request) {
 {{- end}}
 
 {{- else if eq .Category "exec"}}
-{{range .PathParams}}
+{{range .HandlerPathParams}}
 	{{.GoName}} := web.Param(r, "{{.Name}}")
 	if {{.GoName}} == "" {
 		web.RespondJSONError(w, web.ErrBadRequest("{{.Name}} is required"))
@@ -318,10 +318,11 @@ func (b *Bridge) {{.HandlerName}}(w http.ResponseWriter, r *http.Request) {
 {{end}}
 {{- if .HasCreateRels}}
 // =============================================================================
-// Auth Relationship Creation
+// Auth Relationship Creation (one method per create route — the rels for a
+// nested create may reference fields that are absent on the root-create path).
 // =============================================================================
-
-func (b *Bridge) createAuthRelationships(ctx context.Context, record {{.RepoPackage}}.{{.EntityName}}) error {
+{{range .Routes}}{{if .CreateRels}}
+func (b *Bridge) createAuthRelationships{{.FuncName}}(ctx context.Context, record {{$.RepoPackage}}.{{$.EntityName}}) error {
 	if b.authorizer == nil {
 		return nil
 	}
@@ -335,7 +336,7 @@ func (b *Bridge) createAuthRelationships(ctx context.Context, record {{.RepoPack
 	_, _ = subjectType, subjectID
 
 	return b.authorizer.CreateRelationships(ctx, []authorization.CreateRelationship{
-{{- range .AllCreateRels}}
+{{- range .CreateRels}}
 		{
 			ResourceType: "{{.ResourceType}}",
 			ResourceID:   {{.ResourceIDExpr}},
@@ -351,6 +352,7 @@ func (b *Bridge) createAuthRelationships(ctx context.Context, record {{.RepoPack
 {{- end}}
 	})
 }
+{{end}}{{end}}
 {{- end}}
 {{- if .HasDeleteRels}}
 
