@@ -583,7 +583,7 @@ func (b *Bridge) addGeneratedRoutes(group *web.RouteGroup) {
 		httpmid.AuthorizeType(b.authorizer, b.log, b.jsonErrors, "{{if .Authorize.Entity}}{{.Authorize.Entity}}{{else}}{{$.EntitySingular}}{{end}}", "list"),
 {{- end}}
 {{- else}}
-		httpmid.AuthorizeParam(b.authorizer, b.log, b.jsonErrors, "{{if .Authorize.Entity}}{{.Authorize.Entity}}{{else if and .Authorize.Param (eq .Authorize.Param $.PKURLParam)}}{{$.EntitySingular}}{{else if .Authorize.Param}}{{paramToResource .Authorize.Param}}{{else}}{{$.EntitySingular}}{{end}}", "{{.Authorize.Permission}}", "{{.Authorize.Param}}"),
+		httpmid.AuthorizeParam(b.authorizer, b.log, b.jsonErrors, "{{if .Authorize.Entity}}{{.Authorize.Entity}}{{else if .Authorize.Param}}{{paramToResource .Authorize.Param}}{{else}}{{$.EntitySingular}}{{end}}", "{{.Authorize.Permission}}", "{{.Authorize.Param}}"),
 {{- end}}
 {{- else if .UniqueToID}}
 		httpmid.UniqueToID(
