@@ -114,8 +114,14 @@ func BuildFixtureEntity(resolved *ResolvedFile, modulePath string) FixtureEntity
 	}
 
 	// Build a set of FK column names for quick lookup.
+	// Skip self-referential FKs — they won't be params on the function signature.
 	fkColumns := make(map[string]string) // FK column → parent var name
+	selfRefNullableCols := make(map[string]bool)
 	for _, p := range entity.ParentFixtures {
+		if p.IsSelfReference {
+			selfRefNullableCols[p.FKColumn] = true
+			continue
+		}
 		fkColumns[p.FKColumn] = p.VarName
 	}
 
@@ -128,6 +134,10 @@ func BuildFixtureEntity(resolved *ResolvedFile, modulePath string) FixtureEntity
 				if varName, ok := fkColumns[ff.DBName]; ok {
 					ff.IsForeignKey = true
 					ff.TestDefault = varName
+				}
+				// Self-referential nullable FKs default to nil (create root rows).
+				if selfRefNullableCols[ff.DBName] && ff.IsNullable {
+					ff.TestDefault = "nil"
 				}
 				entity.InsertFields = append(entity.InsertFields, ff)
 			}
@@ -145,6 +155,10 @@ func BuildFixtureEntity(resolved *ResolvedFile, modulePath string) FixtureEntity
 			if varName, ok := fkColumns[ff.DBName]; ok {
 				ff.IsForeignKey = true
 				ff.TestDefault = varName
+			}
+			// Self-referential nullable FKs default to nil (create root rows).
+			if selfRefNullableCols[ff.DBName] && ff.IsNullable {
+				ff.TestDefault = "nil"
 			}
 			entity.InsertFields = append(entity.InsertFields, ff)
 		}

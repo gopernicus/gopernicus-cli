@@ -256,7 +256,7 @@ func buildStoreData(resolved *ResolvedFile, domainName, modulePath string) (Stor
 		if rq.HasFilters || rq.HasOrder || rq.HasLimit {
 			hasList = true
 		}
-		if rq.HasFilters {
+		if rq.HasFilters || (rq.HasSearch && len(rq.SearchFields) > 0) {
 			hasFilter = true
 		}
 	}

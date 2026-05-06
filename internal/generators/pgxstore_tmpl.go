@@ -433,6 +433,7 @@ func (s *Store) {{.FuncName}}({{.Params}}) {{.Returns}} {
 {{- end}}
 {{- end}}
 
+{{- if .HasFilter}}
 // ─── filter placeholder substitution ─────────────────────────────────────────
 
 func replaceFilterPlaceholder(sql, placeholder, fragment string) string {
@@ -441,6 +442,7 @@ func replaceFilterPlaceholder(sql, placeholder, fragment string) string {
 	}
 	return strings.Replace(sql, placeholder, "("+fragment+")", 1)
 }
+{{- end}}
 
 // ─── per-function named filters ──────────────────────────────────────────────
 {{range .Methods}}

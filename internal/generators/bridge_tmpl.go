@@ -575,15 +575,13 @@ func (b *Bridge) addGeneratedRoutes(group *web.RouteGroup) {
 {{- if eq .Authorize.Pattern "prefilter"}}
 {{- if .Authorize.Subject}}
 		httpmid.AuthorizeParam(b.authorizer, b.log, b.jsonErrors, "{{subjectType .Authorize.Subject}}", "{{.Authorize.Permission}}", "{{subjectParam .Authorize.Subject}}"),
-{{- else}}
-		httpmid.AuthorizeType(b.authorizer, b.log, b.jsonErrors, "{{if .Authorize.Entity}}{{.Authorize.Entity}}{{else}}{{$.EntitySingular}}{{end}}", "list"),
 {{- end}}
+{{- /* prefilter without Subject: authorization handled in handler via LookupResources */}}
 {{- else if eq .Authorize.Pattern "postfilter"}}
 {{- if .Authorize.Subject}}
 		httpmid.AuthorizeParam(b.authorizer, b.log, b.jsonErrors, "{{subjectType .Authorize.Subject}}", "{{.Authorize.Permission}}", "{{subjectParam .Authorize.Subject}}"),
-{{- else}}
-		httpmid.AuthorizeType(b.authorizer, b.log, b.jsonErrors, "{{if .Authorize.Entity}}{{.Authorize.Entity}}{{else}}{{$.EntitySingular}}{{end}}", "list"),
 {{- end}}
+{{- /* postfilter without Subject: authorization handled in handler via PostfilterLoop */}}
 {{- else}}
 		httpmid.AuthorizeParam(b.authorizer, b.log, b.jsonErrors, "{{if .Authorize.Entity}}{{.Authorize.Entity}}{{else if .Authorize.Param}}{{paramToResource .Authorize.Param}}{{else}}{{$.EntitySingular}}{{end}}", "{{.Authorize.Permission}}", "{{.Authorize.Param}}"),
 {{- end}}
