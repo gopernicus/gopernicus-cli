@@ -722,6 +722,15 @@ const envExampleTemplate = `# {{.AppNameUpper}} Configuration
 # ── Authentication ────────────────────────────────────────────────────────────
 {{.AppNameUpper}}_JWT_SECRET=change-me-to-at-least-32-bytes!!
 {{.AppNameUpper}}_BCRYPT_COST=10
+
+# ── Auth Bridge ───────────────────────────────────────────────────────────────
+# Comma-separated frontend origins for validation (required in production).
+# First origin is used as fallback for email links when app_origin not provided.
+ALLOWED_FRONTENDS=http://localhost:3000
+# Cookie domain for cross-subdomain session sharing (e.g. .example.com)
+AUTH_COOKIE_DOMAIN=
+# Base URL for OAuth callbacks (e.g. https://api.example.com)
+AUTH_CALLBACK_BASE_URL=
 {{- end}}
 {{- if .HasRedis}}
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/format"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
 )
@@ -120,9 +121,11 @@ func buildBridgeData(yml *BridgeYML, resolved *ResolvedFile, domainName, moduleP
 	for _, br := range routes {
 		data.Routes = append(data.Routes, br)
 
-		// Aggregate create rels.
+		// HasCreateRels drives import flags and template emission.
+		// Per-route CreateRels are emitted as createAuthRelationships{FuncName}
+		// methods so that rels referencing nested-only fields (e.g. parent FK
+		// on a nested create) are not applied on a root-create path.
 		if len(br.CreateRels) > 0 {
-			data.AllCreateRels = append(data.AllCreateRels, br.CreateRels...)
 			data.HasCreateRels = true
 		}
 
@@ -358,11 +361,12 @@ func collectPerQueryData(data *BridgeTemplateData, rq ResolvedQuery, seenList, s
 		data.ListQueries = append(data.ListQueries, lq)
 
 	case "create":
-		if seenCreate[rq.FuncName] {
-			return
-		}
-		seenCreate[rq.FuncName] = true
-
+		// Dedup by the resulting Go type shape (the emitted Create{Entity}Request
+		// struct). Two create routes with different SQL FuncNames can still land
+		// on the same request body once params_to_input strips URL-sourced fields
+		// (e.g., CreateRoot and Create for a self-referential parent). In that
+		// case we emit one DTO, not two — two verbatim declarations fail to
+		// compile with "redeclared in this block".
 		cq := BridgeCreateQuery{FuncName: rq.FuncName}
 		for _, f := range rq.InsertFields {
 			// Skip parent FK fields — they come from URL path params, not request body.
@@ -373,6 +377,11 @@ func collectPerQueryData(data *BridgeTemplateData, rq ResolvedQuery, seenList, s
 			cq.Fields = append(cq.Fields, bf)
 			updateImportFlags(data, bf)
 		}
+		sig := createFieldSignature(cq.Fields)
+		if seenCreate[sig] {
+			return
+		}
+		seenCreate[sig] = true
 		data.CreateQueries = append(data.CreateQueries, cq)
 
 	case "update", "update_returning":
@@ -395,6 +404,20 @@ func collectPerQueryData(data *BridgeTemplateData, rq ResolvedQuery, seenList, s
 		}
 		data.UpdateQueries = append(data.UpdateQueries, uq)
 	}
+}
+
+// createFieldSignature returns a deterministic fingerprint of a create-request
+// field set. Used by collectPerQueryData to dedup create queries that produce
+// an identical Create{Entity}Request DTO (e.g., CreateRoot vs. nested Create
+// after params_to_input strips the URL-sourced parent FK).
+func createFieldSignature(fields []BridgeField) string {
+	parts := make([]string, len(fields))
+	for i, f := range fields {
+		parts[i] = f.DBName + ":" + f.GoType
+	}
+	sorted := append([]string(nil), parts...)
+	sort.Strings(sorted)
+	return strings.Join(sorted, ",")
 }
 
 func toBridgeField(f FieldInfo) BridgeField {
@@ -425,14 +448,19 @@ func toBridgeField(f FieldInfo) BridgeField {
 }
 
 // resolveBridgeCreateRels converts parsed AuthCreateRel placeholders into
-// Go expressions suitable for template rendering.
+// Go expressions suitable for template rendering. The fieldTypes map (DBName →
+// GoType) is consulted when a placeholder resolves to a record field; if the
+// underlying field is a pointer (e.g. a nullable self-referential parent FK),
+// the emitted expression is dereferenced so it can be assigned to the
+// authorization.CreateRelationship's `SubjectID string` / `ResourceID string`
+// field without a type mismatch.
 //
 // Placeholder resolution:
 //
 //	{=subject} or {subject} → from authenticated context (SubjectFromContext=true)
-//	{field_name}            → record.GoFieldName
+//	{field_name}            → record.GoFieldName, or *record.GoFieldName when *T
 //	literal                 → quoted string literal
-func resolveBridgeCreateRels(rels []AuthCreateRel) []BridgeCreateRel {
+func resolveBridgeCreateRels(rels []AuthCreateRel, fieldTypes map[string]string) []BridgeCreateRel {
 	result := make([]BridgeCreateRel, len(rels))
 	for i, rel := range rels {
 		br := BridgeCreateRel{
@@ -441,7 +469,7 @@ func resolveBridgeCreateRels(rels []AuthCreateRel) []BridgeCreateRel {
 		}
 
 		// Resolve resource ID.
-		br.ResourceIDExpr = resolveRelPlaceholder(rel.ResourceID)
+		br.ResourceIDExpr = resolveRelPlaceholder(rel.ResourceID, fieldTypes)
 
 		// Resolve subject.
 		if isContextPlaceholder(rel.SubjectType) {
@@ -454,7 +482,7 @@ func resolveBridgeCreateRels(rels []AuthCreateRel) []BridgeCreateRel {
 		}
 
 		if !br.SubjectFromContext && rel.SubjectID != "" {
-			br.SubjectIDExpr = resolveRelPlaceholder(rel.SubjectID)
+			br.SubjectIDExpr = resolveRelPlaceholder(rel.SubjectID, fieldTypes)
 		}
 
 		result[i] = br
@@ -462,10 +490,14 @@ func resolveBridgeCreateRels(rels []AuthCreateRel) []BridgeCreateRel {
 	return result
 }
 
-func resolveRelPlaceholder(s string) string {
+func resolveRelPlaceholder(s string, fieldTypes map[string]string) string {
 	if isPlaceholder(s) {
 		name := placeholderInner(s)
-		return "record." + ToPascalCase(name)
+		expr := "record." + ToPascalCase(name)
+		if strings.HasPrefix(fieldTypes[name], "*") {
+			return "*" + expr
+		}
+		return expr
 	}
 	return `"` + s + `"`
 }

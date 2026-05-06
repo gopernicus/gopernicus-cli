@@ -339,10 +339,16 @@ func BridgeYMLToBridgeRoutes(yml *BridgeYML, resolved *ResolvedFile) ([]BridgeRo
 		}
 
 		// Resolve params_to_input — match names against extracted path params.
+		// If the target field on the repo input struct is a pointer (e.g. a nullable
+		// self-referential parent FK), flag the param so the template emits `&local`.
+		targetFields := paramsToInputTargetFields(rq)
 		for _, paramName := range yr.ParamsToInput {
 			found := false
 			for _, p := range br.PathParams {
 				if p.Name == paramName {
+					if strings.HasPrefix(targetFields[paramName], "*") {
+						p.TargetIsPointer = true
+					}
 					br.ParamsToInput = append(br.ParamsToInput, p)
 					found = true
 					break
@@ -366,7 +372,7 @@ func BridgeYMLToBridgeRoutes(yml *BridgeYML, resolved *ResolvedFile) ([]BridgeRo
 				}
 				createRels = append(createRels, rel)
 			}
-			br.CreateRels = resolveBridgeCreateRels(createRels)
+			br.CreateRels = resolveBridgeCreateRels(createRels, targetFields)
 		}
 
 		// Flag hard-delete routes for auth relationship cleanup.
@@ -384,6 +390,8 @@ func BridgeYMLToBridgeRoutes(yml *BridgeYML, resolved *ResolvedFile) ([]BridgeRo
 			}
 		}
 
+		br.HandlerPathParams = computeHandlerPathParams(br.PathParams, br.RepoCallParams, br.ParamsToInput, br.DeleteCleanup, resolved.PKColumn)
+
 		routes = append(routes, br)
 	}
 
@@ -391,33 +399,69 @@ func BridgeYMLToBridgeRoutes(yml *BridgeYML, resolved *ResolvedFile) ([]BridgeRo
 }
 
 // reorderPathParamsForRepo reorders path params to match the repo function's
-// parameter order (derived from SQL @param order). Params not in queryParams
-// are appended at the end to avoid dropping them.
+// parameter order (derived from SQL @param order) and filters out any path
+// params the repo function does not accept. URL scoping segments that are not
+// referenced by the SQL (e.g. /spaces/{space_id}/ on a query that only filters
+// by dashboard_id) must not be forwarded to the repo call — the result is the
+// exact, ordered set of arguments the repo function expects.
 func reorderPathParamsForRepo(pathParams []PathParam, queryParams []string) []PathParam {
 	paramMap := make(map[string]PathParam, len(pathParams))
 	for _, p := range pathParams {
 		paramMap[p.Name] = p
 	}
 
-	seen := make(map[string]bool)
 	var reordered []PathParam
-
-	// Add in query param order (those that are also path params).
 	for _, qp := range queryParams {
-		if pp, ok := paramMap[qp]; ok && !seen[qp] {
-			seen[qp] = true
+		if pp, ok := paramMap[qp]; ok {
 			reordered = append(reordered, pp)
 		}
 	}
+	return reordered
+}
 
-	// Append any remaining path params not in query params.
-	for _, p := range pathParams {
-		if !seen[p.Name] {
-			reordered = append(reordered, p)
-		}
+// paramsToInputTargetFields maps each insert/set field's DBName to its Go
+// type. Used to decide whether a params_to_input assignment must wrap the
+// local path-param string with `&` because the target struct field is a
+// pointer (e.g. nullable self-referential parent FK).
+func paramsToInputTargetFields(rq ResolvedQuery) map[string]string {
+	m := make(map[string]string, len(rq.InsertFields)+len(rq.SetFields))
+	for _, f := range rq.InsertFields {
+		m[f.DBName] = f.GoType
+	}
+	for _, f := range rq.SetFields {
+		m[f.DBName] = f.GoType
+	}
+	return m
+}
+
+// computeHandlerPathParams returns the subset of path params that the handler
+// body actually references. Extracting an unused path param would produce a
+// "declared and not used" compile error after reorderPathParamsForRepo drops
+// non-query params from the repo call.
+//
+// The union covers:
+//   - repo-call args (RepoCallParams)
+//   - input-struct injection (ParamsToInput)
+//   - the PK param for delete-cleanup routes (used in deleteAuthRelationships)
+func computeHandlerPathParams(pathParams, repoCall, paramsToInput []PathParam, deleteCleanup bool, pkColumn string) []PathParam {
+	needed := make(map[string]bool)
+	for _, p := range repoCall {
+		needed[p.Name] = true
+	}
+	for _, p := range paramsToInput {
+		needed[p.Name] = true
+	}
+	if deleteCleanup {
+		needed[pkColumn] = true
 	}
 
-	return reordered
+	var result []PathParam
+	for _, p := range pathParams {
+		if needed[p.Name] {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 func findResolvedQuery(resolved *ResolvedFile, funcName string) (ResolvedQuery, bool) {
