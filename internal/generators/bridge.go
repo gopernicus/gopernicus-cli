@@ -27,9 +27,11 @@ func GenerateBridge(resolved *ResolvedFile, domainName, modulePath, projectRoot 
 		return false, err
 	}
 
-	if len(yml.Routes) == 0 {
-		return false, nil
-	}
+	// An empty `routes:` block is a valid configuration: a domain may
+	// expose only custom (non-generated) handlers from routes.go. We still
+	// regenerate the bootstrap + generated stub so addGeneratedRoutes /
+	// addGeneratedOpenAPISpec exist as empty no-ops, otherwise routes.go
+	// (which calls them) would fail to compile.
 
 	data, err := buildBridgeData(yml, resolved, domainName, modulePath, authEnabled, bridgeDir)
 	if err != nil {
@@ -158,13 +160,18 @@ func buildBridgeData(yml *BridgeYML, resolved *ResolvedFile, domainName, moduleP
 	}
 
 	// Set import flags for auth features.
-	if data.AuthEnabled {
-		data.NeedsAuthorizationImport = true
-	}
+	// NeedsAuthorizationImport gates the `core/auth/authorization` import
+	// in generated.go specifically — the bootstrap bridge.go gates its own
+	// authorization import on AuthEnabled. The generated.go body only
+	// references the `authorization` package in: prefilter (no subject ref),
+	// postfilter, withPermissions check, and create-rels helpers. Plain
+	// `authorize: param: ...` routes only emit `httpmid.AuthorizeParam(...)`
+	// which uses `b.authorizer` from the struct — no package reference.
 	if data.HasCreateRels {
 		data.NeedsStringsImport = true
 		data.NeedsContextImport = true
 		data.NeedsHTTPMidImport = true
+		data.NeedsAuthorizationImport = true
 	}
 	if data.HasDeleteRels {
 		data.NeedsContextImport = true
@@ -174,8 +181,15 @@ func buildBridgeData(yml *BridgeYML, resolved *ResolvedFile, domainName, moduleP
 	seenPostfilter := make(map[string]bool)
 	for _, route := range data.Routes {
 		if route.Authorize != nil {
-			data.NeedsAuthorizationImport = true
 			data.NeedsHTTPMidImport = true
+			switch route.Authorize.Pattern {
+			case "prefilter":
+				if route.Authorize.SubjectRef == "" {
+					data.NeedsAuthorizationImport = true
+				}
+			case "postfilter":
+				data.NeedsAuthorizationImport = true
+			}
 		}
 		if route.WithPermissions {
 			data.NeedsAuthorizationImport = true
