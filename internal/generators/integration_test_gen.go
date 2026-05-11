@@ -67,6 +67,19 @@ type IntegrationTestData struct {
 
 	// Domain info
 	DomainName string
+
+	// *ExtraCallArgs are Go expressions to pass for queries whose SQL declares
+	// scope parameters beyond the PK / filter (e.g. @parent_world_id on a
+	// Get / List / SoftDelete / Delete). Each expression reads from the first
+	// created fixture's struct, dereferencing nullable columns. Examples:
+	// []string{"*created.ParentWorldID"}.
+	//
+	// Held per-method because the same entity may have different scope shapes
+	// across its standard verbs (though in practice they usually match).
+	ListExtraCallArgs       []string
+	GetExtraCallArgs        []string
+	SoftDeleteExtraCallArgs []string
+	HardDeleteExtraCallArgs []string
 }
 
 // BuildIntegrationTestData creates test data from a resolved file.
@@ -102,6 +115,9 @@ func BuildIntegrationTestData(resolved *ResolvedFile, modulePath string) (Integr
 			if pk := FindPKParam(m.PKParams, resolved.PKColumn); pk != "" {
 				tm.PKParam = pk
 			}
+			if m.Name == "Get" {
+				data.GetExtraCallArgs = buildScopeCallArgs(rq, resolved.PKColumn, resolved)
+			}
 
 		case "create":
 			data.HasCreate = true
@@ -113,6 +129,7 @@ func BuildIntegrationTestData(resolved *ResolvedFile, modulePath string) (Integr
 			if m.Name == "List" {
 				data.HasList = true
 				tm.HasList = true
+				data.ListExtraCallArgs = buildScopeCallArgs(rq, "", resolved)
 			}
 
 		case "update":
@@ -138,17 +155,22 @@ func BuildIntegrationTestData(resolved *ResolvedFile, modulePath string) (Integr
 			tm.ReturnsEntity = true
 
 		case "exec":
-			// Determine if it's a delete or state change.
-			if rq.Type == QueryDelete {
+			// Determine if it's a delete or state change. Only the method
+			// literally named "Delete" drives the standard hard-delete test —
+			// auxiliary delete-by-X variants have different signatures and
+			// would clobber the scope-arg list if we let them in.
+			if rq.Type == QueryDelete && m.Name == "Delete" {
 				data.HasHardDelete = true
 				tm.IsDelete = true
-			} else {
+				data.HardDeleteExtraCallArgs = buildScopeCallArgs(rq, resolved.PKColumn, resolved)
+			} else if rq.Type != QueryDelete {
 				nameLower := strings.ToLower(m.Name)
 				switch {
 				case nameLower == "softdelete":
 					data.HasSoftDelete = true
 					tm.IsSoftState = true
 					tm.NewState = "deleted"
+					data.SoftDeleteExtraCallArgs = buildScopeCallArgs(rq, resolved.PKColumn, resolved)
 				case nameLower == "archive":
 					tm.IsSoftState = true
 					tm.NewState = "archived"
@@ -204,6 +226,67 @@ func GenerateIntegrationTest(data IntegrationTestData, storeDir string, opts Opt
 	}
 
 	return nil
+}
+
+// buildScopeCallArgs returns Go expressions that read a query's scope
+// parameters (e.g. @parent_world_id) off the first created fixture's struct.
+// Used by the generated standard smoke tests (Get / List / SoftDelete /
+// HardDelete) to match the generated Store method's positional signature.
+//
+// Pass excludePKColumn to skip the PK param (Get / SoftDelete / Delete
+// already pass the PK as their first arg). Pass "" for List, which has no
+// PK in its params at all.
+//
+// Returns nil when the query has no extra params beyond the (optional) PK.
+func buildScopeCallArgs(rq ResolvedQuery, excludePKColumn string, resolved *ResolvedFile) []string {
+	if len(rq.Params) == 0 {
+		return nil
+	}
+	colByName := make(map[string]int, len(resolved.AllColumns))
+	for i, col := range resolved.AllColumns {
+		colByName[col.Name] = i
+	}
+	out := make([]string, 0, len(rq.Params))
+	for _, p := range rq.Params {
+		if p == excludePKColumn {
+			continue
+		}
+		idx, ok := colByName[p]
+		if !ok {
+			// Param does not map to a column on this entity (e.g. a free-form
+			// search term). Fall back to the Go zero value for its declared
+			// type so the test at least compiles.
+			goType := "string"
+			if t, ok := rq.ParamTypes[p]; ok {
+				goType = t
+			}
+			out = append(out, zeroValueExprForGoType(goType))
+			continue
+		}
+		col := resolved.AllColumns[idx]
+		expr := "created." + ToPascalCase(p)
+		if strings.HasPrefix(col.GoType, "*") {
+			expr = "*" + expr
+		}
+		out = append(out, expr)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func zeroValueExprForGoType(goType string) string {
+	switch goType {
+	case "string":
+		return `""`
+	case "bool":
+		return "false"
+	case "int", "int32", "int64", "float64":
+		return "0"
+	default:
+		return goType + "{}"
+	}
 }
 
 func renderIntegrationTestTemplate(tmplStr string, data IntegrationTestData) ([]byte, error) {

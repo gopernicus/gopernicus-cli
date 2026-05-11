@@ -60,20 +60,23 @@ func Resolve(qf *File, s *schema.ReflectedSchema, domainName string) (*ResolvedF
 		pkGoName = ToPascalCase(pkColumn)
 	}
 
+	_, skipIntegrationTest := qf.FileAnnotations["skip-integration-test"]
+
 	rf := &ResolvedFile{
-		Table:        table,
-		SchemaName:   s.SchemaName,
-		PackageName:  RepoPackage(qf.Table),
-		StorePkg:     StorePackage(qf.Table, "pgx"),
-		EntityName:   entityPascal,
-		EntityLower:  strings.ToLower(entityRaw),
-		EntityPlural: ToPascalCase(Pluralize(entityRaw)),
-		TableName:    qf.Table,
-		DomainName:   domainName,
-		AllColumns:   table.Columns,
-		PKColumn:     pkColumn,
-		PKGoName:     pkGoName,
-		PKGoType:     pkGoType,
+		Table:               table,
+		SchemaName:          s.SchemaName,
+		PackageName:         RepoPackage(qf.Table),
+		StorePkg:            StorePackage(qf.Table, "pgx"),
+		EntityName:          entityPascal,
+		EntityLower:         strings.ToLower(entityRaw),
+		EntityPlural:        ToPascalCase(Pluralize(entityRaw)),
+		TableName:           qf.Table,
+		DomainName:          domainName,
+		AllColumns:          table.Columns,
+		PKColumn:            pkColumn,
+		PKGoName:            pkGoName,
+		PKGoType:            pkGoType,
+		SkipIntegrationTest: skipIntegrationTest,
 	}
 
 	colMap := buildColumnMap(table)

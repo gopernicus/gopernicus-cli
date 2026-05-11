@@ -30,7 +30,10 @@ var (
 )
 
 // setupTestStore creates a test database and store for integration tests.
-// migrateTestDB must be defined in store_test.go (bootstrap file).
+// migrateTestDB and testPGXOptions are defined in store_test.go (bootstrap
+// file). testPGXOptions lets the consumer customize the Postgres image,
+// enable extensions, etc. — needed when a project depends on extensions
+// like pgvector that the default image doesn't include.
 func setupTestStore(t *testing.T) (context.Context, *testpgx.TestPGX, *Store) {
 	t.Helper()
 
@@ -39,7 +42,8 @@ func setupTestStore(t *testing.T) (context.Context, *testpgx.TestPGX, *Store) {
 	}
 
 	ctx := context.Background()
-	db := testpgx.SetupTestPGX(t, ctx, testpgx.WithMigrations(migrateTestDB))
+	opts := append([]testpgx.Option{testpgx.WithMigrations(migrateTestDB)}, testPGXOptions...)
+	db := testpgx.SetupTestPGX(t, ctx, opts...)
 	store := NewStore(logger.NewNoop(), db.Pool)
 	return ctx, db, store
 }
@@ -49,9 +53,10 @@ func TestGenerated{{.EntityName}}Store_Create(t *testing.T) {
 	pgxfixtures.TruncatePublicSchema(t, ctx, db.Pool)
 
 	created := fixtures.CreateTest{{.EntityName}}WithDefaults(t, ctx, db)
+	_ = created
 
 	// Verify the record was created and can be retrieved.
-	result, err := store.Get(ctx, created.{{.PKGoName}})
+	result, err := store.Get(ctx, created.{{.PKGoName}}{{range .GetExtraCallArgs}}, {{.}}{{end}})
 	require.NoError(t, err)
 	assert.Equal(t, created.{{.PKGoName}}, result.{{.PKGoName}})
 }
@@ -61,15 +66,16 @@ func TestGenerated{{.EntityName}}Store_Get(t *testing.T) {
 	pgxfixtures.TruncatePublicSchema(t, ctx, db.Pool)
 
 	created := fixtures.CreateTest{{.EntityName}}WithDefaults(t, ctx, db)
+	_ = created
 
 	t.Run("found", func(t *testing.T) {
-		result, err := store.Get(ctx, created.{{.PKGoName}})
+		result, err := store.Get(ctx, created.{{.PKGoName}}{{range .GetExtraCallArgs}}, {{.}}{{end}})
 		require.NoError(t, err)
 		assert.Equal(t, created.{{.PKGoName}}, result.{{.PKGoName}})
 	})
 
 	t.Run("not found", func(t *testing.T) {
-		_, err := store.Get(ctx, "nonexistent-id")
+		_, err := store.Get(ctx, "nonexistent-id"{{range .GetExtraCallArgs}}, {{.}}{{end}})
 		require.Error(t, err)
 	})
 }
@@ -78,25 +84,28 @@ func TestGenerated{{.EntityName}}Store_List(t *testing.T) {
 	ctx, db, store := setupTestStore(t)
 	pgxfixtures.TruncatePublicSchema(t, ctx, db.Pool)
 
-	// Create multiple records.
+	// Each fixture creates its own FK scope. When List filters by scope,
+	// only the matching row is visible; assertions below reflect that.
 	const numRecords = 3
-	for i := 0; i < numRecords; i++ {
+	created := fixtures.CreateTest{{.EntityName}}WithDefaults(t, ctx, db)
+	for i := 1; i < numRecords; i++ {
 		fixtures.CreateTest{{.EntityName}}WithDefaults(t, ctx, db)
 	}
+	_ = created
 
-	t.Run("returns all records", func(t *testing.T) {
+	t.Run("returns records", func(t *testing.T) {
 		filter := {{.RepoPkg}}.FilterList{}
 		orderBy := fop.NewOrder({{.RepoPkg}}.DefaultOrderBy, {{.RepoPkg}}.DefaultOrderDirection)
-		results, err := store.List(ctx, filter, orderBy, fop.PageStringCursor{}, false)
+		results, err := store.List(ctx, filter{{range .ListExtraCallArgs}}, {{.}}{{end}}, orderBy, fop.PageStringCursor{}, false)
 		require.NoError(t, err)
-		assert.GreaterOrEqual(t, len(results), numRecords)
+		assert.GreaterOrEqual(t, len(results), 1)
 	})
 
 	t.Run("respects limit", func(t *testing.T) {
 		filter := {{.RepoPkg}}.FilterList{}
 		orderBy := fop.NewOrder({{.RepoPkg}}.DefaultOrderBy, {{.RepoPkg}}.DefaultOrderDirection)
 		page := fop.PageStringCursor{Limit: 2}
-		results, err := store.List(ctx, filter, orderBy, page, false)
+		results, err := store.List(ctx, filter{{range .ListExtraCallArgs}}, {{.}}{{end}}, orderBy, page, false)
 		require.NoError(t, err)
 		assert.LessOrEqual(t, len(results), 2)
 	})
@@ -104,7 +113,7 @@ func TestGenerated{{.EntityName}}Store_List(t *testing.T) {
 	t.Run("no duplicates", func(t *testing.T) {
 		filter := {{.RepoPkg}}.FilterList{}
 		orderBy := fop.NewOrder({{.RepoPkg}}.DefaultOrderBy, {{.RepoPkg}}.DefaultOrderDirection)
-		results, err := store.List(ctx, filter, orderBy, fop.PageStringCursor{}, false)
+		results, err := store.List(ctx, filter{{range .ListExtraCallArgs}}, {{.}}{{end}}, orderBy, fop.PageStringCursor{}, false)
 		require.NoError(t, err)
 
 		seen := make(map[string]bool)
@@ -120,12 +129,13 @@ func TestGenerated{{.EntityName}}Store_Delete(t *testing.T) {
 	pgxfixtures.TruncatePublicSchema(t, ctx, db.Pool)
 
 	created := fixtures.CreateTest{{.EntityName}}WithDefaults(t, ctx, db)
+	_ = created
 
-	err := store.Delete(ctx, created.{{.PKGoName}})
+	err := store.Delete(ctx, created.{{.PKGoName}}{{range .HardDeleteExtraCallArgs}}, {{.}}{{end}})
 	require.NoError(t, err)
 
 	// Verify record is gone.
-	_, err = store.Get(ctx, created.{{.PKGoName}})
+	_, err = store.Get(ctx, created.{{.PKGoName}}{{range .GetExtraCallArgs}}, {{.}}{{end}})
 	require.Error(t, err)
 }
 {{end}}{{if .HasSoftDelete}}
@@ -134,12 +144,13 @@ func TestGenerated{{.EntityName}}Store_SoftDelete(t *testing.T) {
 	pgxfixtures.TruncatePublicSchema(t, ctx, db.Pool)
 
 	created := fixtures.CreateTest{{.EntityName}}WithDefaults(t, ctx, db)
+	_ = created
 
-	err := store.SoftDelete(ctx, created.{{.PKGoName}})
+	err := store.SoftDelete(ctx, created.{{.PKGoName}}{{range .SoftDeleteExtraCallArgs}}, {{.}}{{end}})
 	require.NoError(t, err)
 
 	// Verify record state changed.
-	result, err := store.Get(ctx, created.{{.PKGoName}})
+	result, err := store.Get(ctx, created.{{.PKGoName}}{{range .GetExtraCallArgs}}, {{.}}{{end}})
 	require.NoError(t, err)
 	assert.Equal(t, "deleted", result.RecordState)
 }
@@ -166,6 +177,7 @@ import (
 	"context"
 
 	"github.com/gopernicus/gopernicus/infrastructure/database/postgres/pgxdb"
+	"github.com/gopernicus/gopernicus/workshop/testing/testpgx"
 )
 
 // migrateTestDB runs migrations for the test database.
@@ -183,4 +195,14 @@ func migrateTestDB(_ context.Context, _ *pgxdb.Pool) error {
 	// Replace with actual migration logic.
 	return nil
 }
+
+// testPGXOptions provides extra options to testpgx.SetupTestPGX in the
+// generated setupTestStore helper. Use it to pick a Postgres image with
+// required extensions, e.g.:
+//
+//	var testPGXOptions = []testpgx.Option{
+//		testpgx.WithPostgresVersion("pgvector/pgvector:pg17"),
+//		testpgx.WithExtensions("vector", "pg_trgm"),
+//	}
+var testPGXOptions []testpgx.Option
 `
