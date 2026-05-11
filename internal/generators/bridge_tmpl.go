@@ -27,7 +27,9 @@ import (
 {{- if .NeedsFmtImport}}
 	"fmt"
 {{- end}}
+{{- if .Routes}}
 	"net/http"
+{{- end}}
 {{- if .NeedsStrconvImport}}
 	"strconv"
 {{- end}}
@@ -41,11 +43,15 @@ import (
 {{- if .NeedsBridgeFOPImport}}
 	fopb "{{.FrameworkPath}}/bridge/transit/fop"
 {{- end}}
+{{- if .Routes}}
 	"{{.FrameworkPath}}/bridge/transit/httpmid"
+{{- end}}
 {{- if .NeedsAuthorizationImport}}
 	"{{.FrameworkPath}}/core/auth/authorization"
 {{- end}}
+{{- if .Routes}}
 	"{{.FrameworkPath}}/sdk/errs"
+{{- end}}
 	"{{.FrameworkPath}}/sdk/fop"
 {{- if .NeedsValidationImport}}
 	"{{.FrameworkPath}}/sdk/validation"
