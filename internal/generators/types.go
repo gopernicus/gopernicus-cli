@@ -131,6 +131,14 @@ type ResolvedFile struct {
 	AuthRelations   []AuthRelation
 	AuthPermissions []AuthPermission
 
+	// SkipIntegrationTest suppresses generation of the per-store
+	// generated_test.go file for this entity. Set by the file-level
+	// `-- @skip-integration-test` annotation in queries.sql. Use this
+	// when an entity has cross-column invariants (e.g. mutually exclusive
+	// nullable FK groups) that the generic fixture cannot satisfy —
+	// hand-write the desired tests in store_test.go instead.
+	SkipIntegrationTest bool
+
 	Queries []ResolvedQuery
 }
 

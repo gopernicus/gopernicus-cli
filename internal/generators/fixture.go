@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/format"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"text/template"
@@ -173,12 +174,86 @@ func BuildFixtureEntity(resolved *ResolvedFile, modulePath string) FixtureEntity
 		}
 	}
 
+	// Honor CHECK constraints with enum-style allowed-value lists
+	// (e.g. CHECK (principal_type IN ('user', 'service_account'))).
+	// Without this, the generic test-default `"test_<col>"` violates the
+	// constraint at INSERT time. The first allowed value wins.
+	if resolved.Table != nil {
+		allowed := allowedValuesFromCheckConstraints(resolved.Table.Constraints)
+		if len(allowed) > 0 {
+			for i, f := range entity.InsertFields {
+				if vals, ok := allowed[f.DBName]; ok && len(vals) > 0 {
+					// Only override non-FK string fields. FK columns get a
+					// fixture-provided variable name and shouldn't be coerced
+					// to a literal.
+					if !f.IsForeignKey {
+						entity.InsertFields[i].TestDefault = fmt.Sprintf("%q", vals[0])
+					}
+				}
+			}
+		}
+	}
+
 	// Build AllColumns for SELECT back.
 	for _, col := range resolved.AllColumns {
 		entity.AllColumns = append(entity.AllColumns, columnToFixture(col))
 	}
 
 	return entity
+}
+
+// checkArrayValueRe pulls single-quoted string literals out of an `ARRAY[...]`
+// inside a CHECK constraint's definition string. Postgres canonicalizes
+// `col IN ('a', 'b')` to `(col)::text = ANY ((ARRAY['a'::varchar, 'b'::varchar])::text[])`
+// so we cannot rely on the source `IN (...)` syntax surviving reflection.
+var checkArrayValueRe = regexp.MustCompile(`'([^']*)'`)
+
+// allowedValuesFromCheckConstraints returns a column → []value map for any
+// single-column CHECK constraint that pins the column to a finite set of
+// string literals. Two canonical shapes are recognized:
+//
+//   - `col IN ('a', 'b')` → `(col)::text = ANY ((ARRAY['a'::varchar, 'b'::varchar])::text[])`
+//   - `col = 'v'`         → `(col)::text = 'v'::text`
+//
+// Range, regexp, and multi-column checks pass through unmodified — callers
+// should treat them as "no override needed."
+func allowedValuesFromCheckConstraints(constraints []schema.ConstraintInfo) map[string][]string {
+	out := make(map[string][]string)
+	for _, c := range constraints {
+		if !strings.EqualFold(c.Type, "CHECK") {
+			continue
+		}
+		if len(c.Columns) != 1 {
+			continue
+		}
+		def := c.Definition
+
+		// Shape 1: ARRAY[...] (IN-list form).
+		if start := strings.Index(def, "ARRAY["); start >= 0 {
+			if end := strings.Index(def[start:], "]"); end > 0 {
+				segment := def[start : start+end+1]
+				matches := checkArrayValueRe.FindAllStringSubmatch(segment, -1)
+				if len(matches) > 0 {
+					vals := make([]string, 0, len(matches))
+					for _, m := range matches {
+						vals = append(vals, m[1])
+					}
+					out[c.Columns[0]] = vals
+					continue
+				}
+			}
+		}
+
+		// Shape 2: single-value equality. Recognized only when the
+		// constraint contains exactly one quoted literal — otherwise
+		// we can't tell apart `col = 'v'` from cases where multiple
+		// literals appear as type tags or unrelated subexpressions.
+		matches := checkArrayValueRe.FindAllStringSubmatch(def, -1)
+		if len(matches) == 1 {
+			out[c.Columns[0]] = []string{matches[0][1]}
+		}
+	}
+	return out
 }
 
 // buildParentFixtures extracts FK dependencies from a table.
@@ -417,6 +492,7 @@ func renderFixtureTemplate(tmplStr string, data FixtureTemplateData) ([]byte, er
 	funcMap := template.FuncMap{
 		"lower":          strings.ToLower,
 		"camel":          ToCamelCase,
+		"singularize":    Singularize,
 		"join":           strings.Join,
 		"positionalArgs": positionalArgs,
 		"add":            func(a, b int) int { return a + b },
@@ -552,14 +628,36 @@ func testDefaultForField(f FixtureField) string {
 			return "conversion.Ptr(0.0)"
 		case "time.Time":
 			return "conversion.Ptr(time.Now().UTC())"
+		case "json.RawMessage":
+			// Postgres rejects empty bytes as invalid JSON; emit `{}` so the
+			// INSERT succeeds whether the column is jsonb or json.
+			return `conversion.Ptr(json.RawMessage("{}"))`
 		default:
 			return fmt.Sprintf("conversion.Ptr(%s{})", innerType)
 		}
 	}
 
+	// Non-pointer JSON column.
+	if f.GoType == "json.RawMessage" {
+		return `json.RawMessage("{}")`
+	}
+
 	// Non-pointer types.
 	switch f.GoType {
 	case "string":
+		// Honor varchar(N) length caps so smoke-test inserts don't
+		// overflow narrow columns like varchar(12). The unique-ID slice
+		// is enough to keep values distinct without prefixing.
+		if f.MaxLength > 0 && f.MaxLength < 24 {
+			n := f.MaxLength
+			if n > 16 {
+				n = 16
+			}
+			if n <= 0 {
+				return `""`
+			}
+			return fmt.Sprintf(`testUniqueID[:%d]`, n)
+		}
 		switch {
 		case dbName == "email" || strings.HasSuffix(dbName, "_email"):
 			return `"test_" + testUniqueID[:8] + "@example.com"`

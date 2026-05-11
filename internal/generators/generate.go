@@ -200,7 +200,35 @@ func Run(cfg Config) error {
 		}
 	}
 
-	// Generate test fixtures (single package across all domains for cross-domain FK resolution).
+	// Generate test fixtures. The fixtures file is a single package across ALL
+	// domains so cross-domain FK chains resolve (e.g. a graph entity referencing
+	// a worlds entity needs the worlds fixture in scope). When a domain filter
+	// is active, augment the in-scope entities with parse+resolve of every other
+	// domain's queries.sql so we don't overwrite the file with only the filtered
+	// domain's entities.
+	if cfg.Domain != "" {
+		inScope := make(map[string]bool, len(queryFiles))
+		for _, qf := range queryFiles {
+			inScope[qf] = true
+		}
+		allQueryFiles, err := discoverQueryFiles(repoRoot, "")
+		if err != nil {
+			return fmt.Errorf("discover all queries for fixtures: %w", err)
+		}
+		for _, qfPath := range allQueryFiles {
+			if inScope[qfPath] {
+				continue
+			}
+			resolved, err := resolveForFixture(qfPath, schemas, cfg.ProjectRoot)
+			if err != nil {
+				return fmt.Errorf("%s: resolve for fixture: %w", qfPath, err)
+			}
+			if resolved == nil {
+				continue
+			}
+			allFixtureEntities = append(allFixtureEntities, BuildFixtureEntity(resolved, modulePath))
+		}
+	}
 	if len(allFixtureEntities) > 0 {
 		fixtureDir := filepath.Join(cfg.ProjectRoot, "workshop", "testing", "fixtures")
 		data := FixtureTemplateData{
@@ -307,14 +335,29 @@ func generateFromQueryFile(
 		return nil, fmt.Errorf("pgxstore: %w", err)
 	}
 
-	// Generate pgxstore integration tests.
+	// Generate pgxstore integration tests, unless the entity opted out via
+	// `-- @skip-integration-test` in queries.sql. When skipped, remove any
+	// previously generated test file so a stale copy doesn't linger and
+	// keep failing.
 	storeDir := StoreDir(domainName, resolved.TableName, "pgx", projectRoot)
-	testData, err := BuildIntegrationTestData(resolved, modulePath)
-	if err != nil {
-		return nil, fmt.Errorf("integration test data: %w", err)
-	}
-	if err := GenerateIntegrationTest(testData, storeDir, opts); err != nil {
-		return nil, fmt.Errorf("integration tests: %w", err)
+	if resolved.SkipIntegrationTest {
+		stalePath := filepath.Join(storeDir, "generated_test.go")
+		if fileExists(stalePath) && !opts.DryRun {
+			if err := os.Remove(stalePath); err != nil {
+				return nil, fmt.Errorf("remove stale generated_test.go: %w", err)
+			}
+			if opts.Verbose {
+				fmt.Printf("      removed %s (skip-integration-test)\n", stalePath)
+			}
+		}
+	} else {
+		testData, err := BuildIntegrationTestData(resolved, modulePath)
+		if err != nil {
+			return nil, fmt.Errorf("integration test data: %w", err)
+		}
+		if err := GenerateIntegrationTest(testData, storeDir, opts); err != nil {
+			return nil, fmt.Errorf("integration tests: %w", err)
+		}
 	}
 
 	// Generate cache layer (only if any @cache annotations exist).
@@ -332,6 +375,45 @@ func generateFromQueryFile(
 	}
 
 	return resolved, nil
+}
+
+// resolveForFixture parses and resolves a queries.sql file without running
+// any code generation. Used to collect FixtureEntity data for entities that
+// live outside the current `--domain` filter, so the fixtures package can stay
+// cumulative across domains. Returns (nil, nil) if the table cannot be
+// matched against any reflected schema (same skip semantics as
+// generateFromQueryFile).
+func resolveForFixture(
+	qfPath string,
+	schemas map[string]*schema.ReflectedSchema,
+	projectRoot string,
+) (*ResolvedFile, error) {
+	qf, err := Parse(qfPath)
+	if err != nil {
+		return nil, err
+	}
+
+	repoDir := filepath.Dir(qfPath)
+	dirName := filepath.Base(repoDir)
+
+	tableName, schemaName, err := inferTableName(dirName, schemas, qf.Database)
+	if err != nil {
+		return nil, nil
+	}
+	qf.Table = tableName
+
+	key := qf.Database + ":" + schemaName
+	s, ok := schemas[key]
+	if !ok {
+		return nil, fmt.Errorf(
+			"reflected schema for database %q schema %q not found\n\n"+
+				"Run 'gopernicus db reflect' to generate it.",
+			qf.Database, schemaName,
+		)
+	}
+
+	domainName := domainFromPath(qfPath, projectRoot)
+	return Resolve(qf, s, domainName)
 }
 
 func loadSchemas(root string, m *manifest.Manifest) (map[string]*schema.ReflectedSchema, error) {

@@ -50,7 +50,7 @@ func CreateTest{{$e.EntityName}}(t *testing.T, ctx context.Context, db *testpgx.
 		INSERT INTO principals (principal_id, principal_type, created_at)
 		VALUES ($1, $2, NOW())
 		ON CONFLICT (principal_id) DO NOTHING
-	` + "`" + `, {{camel $e.PKColumn}}, "{{lower $e.EntityName}}")
+	` + "`" + `, {{camel $e.PKColumn}}, "{{singularize $e.TableName}}")
 	require.NoError(t, err, "failed to insert principal for {{$e.EntityName}}")
 {{end}}
 	// Insert directly via SQL (bypassing repository for test isolation).
@@ -85,8 +85,8 @@ func CreateTest{{$e.EntityName}}(t *testing.T, ctx context.Context, db *testpgx.
 func CreateTest{{$e.EntityName}}WithDefaults(t *testing.T, ctx context.Context, db *testpgx.TestPGX{{range $e.AllExternalParams}}, {{.VarName}} string{{end}}) {{$e.RepoPkg}}.{{$e.EntityName}} {
 	t.Helper()
 {{range inBatchParents $e.ParentFixtures}}
-	parent{{.EntityName}} := CreateTest{{.EntityName}}WithDefaults(t, ctx, db{{range .ForwardParams}}, {{.VarName}}{{end}})
-	{{.VarName}} := parent{{.EntityName}}.{{.PKGoName}}
+	{{.VarName}}Parent := CreateTest{{.EntityName}}WithDefaults(t, ctx, db{{range .ForwardParams}}, {{.VarName}}{{end}})
+	{{.VarName}} := {{.VarName}}Parent.{{.PKGoName}}
 {{end}}
 	return CreateTest{{$e.EntityName}}(t, ctx, db{{range nonSelfRefParents $e.ParentFixtures}}, {{.VarName}}{{end}})
 }
