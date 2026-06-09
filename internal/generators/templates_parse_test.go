@@ -46,6 +46,8 @@ func TestTemplatesParse(t *testing.T) {
 		{"repoFop", repoFopTemplate, repoFuncs},
 		{"storeGenerated", storeGeneratedTemplate, nil},
 		{"storeBootstrap", storeBootstrapTemplate, nil},
+		{"specStoreGenerated", specStoreGeneratedTemplate, nil},
+		{"specStoreBootstrap", specStoreBootstrapTemplate, nil},
 		{"cacheGenerated", cacheGeneratedTemplate, nil},
 		{"cacheBootstrap", cacheBootstrapTemplate, nil},
 		{"bridgeGenerated", bridgeGeneratedTemplate, bridgeFuncs},
