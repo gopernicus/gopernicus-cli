@@ -41,7 +41,7 @@ func runDoctor(_ context.Context, _ []string) error {
 	root, err := project.FindRoot()
 	if err != nil {
 		fmt.Println("✗ project root — no go.mod found in current or parent directories")
-		return nil
+		return fmt.Errorf("doctor found problems")
 	}
 	fmt.Printf("  project root: %s\n\n", root)
 
@@ -70,11 +70,11 @@ func runDoctor(_ context.Context, _ []string) error {
 	}
 
 	fmt.Println()
-	if allPassed {
-		fmt.Println("All checks passed.")
-	} else {
+	if !allPassed {
 		fmt.Println("Some checks failed. Run 'gopernicus init' to set up a project.")
+		return fmt.Errorf("doctor found problems")
 	}
+	fmt.Println("All checks passed.")
 	return nil
 }
 

@@ -238,7 +238,7 @@ func ParseString(input string) (*File, error) {
 //
 //	Standard:  "@func: ListUsers"      → key="func",   name="",           val="ListUsers"
 //	Named:     "@filter:conditions *"  → key="filter",  name="conditions", val="*"
-//	Named:     "@http:json GET /foo"   → key="http",    name="json",       val="GET /foo"
+//	Named:     "@type:now timestamptz" → key="type",    name="now",        val="timestamptz"
 //	Standard:  "@order: *,-foo"        → key="order",   name="",           val="*,-foo"
 func parseAnnotation(body string) (key, name, val string, ok bool) {
 	if !strings.HasPrefix(body, "@") {

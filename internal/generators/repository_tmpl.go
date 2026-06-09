@@ -23,10 +23,10 @@ import (
 	"{{.}}"
 {{- end}}
 
-	"github.com/gopernicus/gopernicus/sdk/errs"
-	"github.com/gopernicus/gopernicus/sdk/fop"
+	"{{.FrameworkPath}}/sdk/errs"
+	"{{.FrameworkPath}}/sdk/fop"
 {{- if .HasEvents}}
-	"github.com/gopernicus/gopernicus/infrastructure/events"
+	"{{.FrameworkPath}}/infrastructure/events"
 {{- end}}
 )
 
@@ -221,8 +221,16 @@ func (r *Repository) {{.Name}}(ctx context.Context, filter {{.FilterTypeName}}, 
 		orderBy = fop.NewOrder(DefaultOrderBy, DefaultOrderDirection)
 	}
 	orderField := orderBy.Field
+	encodeCursor := func(record {{if .ListReturnType}}{{.ListReturnType}}{{else}}{{$.EntityName}}{{end}}) (string, error) {
+{{- if .ListReturnType}}
+		return Encode{{.Name}}ResultCursor(record, orderField)
+{{- else}}
+		return Encode{{$.EntityName}}Cursor(record, orderField)
+{{- end}}
+	}
 
-	// Over-fetch by one to detect next page.
+	// Over-fetch by one to detect next page; fop.TrimPage trims back to the
+	// requested limit and encodes NextCursor from the last returned record.
 	listPage := fop.PageStringCursor{
 		Limit:  page.Limit + 1,
 		Cursor: page.Cursor,
@@ -233,43 +241,17 @@ func (r *Repository) {{.Name}}(ctx context.Context, filter {{.FilterTypeName}}, 
 		return nil, fop.Pagination{}, fmt.Errorf("query: %w", err)
 	}
 
-	returnableRecords := records
-	nextCursor := ""
-
-	if len(records) > page.Limit {
-		returnableRecords = records[:page.Limit]
-		lastRecord := returnableRecords[len(returnableRecords)-1]
-{{- if .ListReturnType}}
-		nextCursor, err = Encode{{.Name}}ResultCursor(lastRecord, orderField)
-{{- else}}
-		nextCursor, err = Encode{{$.EntityName}}Cursor(lastRecord, orderField)
-{{- end}}
-		if err != nil {
-			return nil, fop.Pagination{}, fmt.Errorf("encode next cursor: %w", err)
-		}
-	}
-
-	pagination := fop.Pagination{
-		Limit:      page.Limit,
-		NextCursor: nextCursor,
-		PageTotal:  len(returnableRecords),
+	returnableRecords, pagination, err := fop.TrimPage(records, page.Limit, encodeCursor)
+	if err != nil {
+		return nil, fop.Pagination{}, err
 	}
 
 	// Check for previous page when a cursor was provided.
 	if page.Cursor != "" {
 		prevRecords, err := r.store.{{.Name}}(ctx, filter, {{if .ExplicitCallArgs}}{{.ExplicitCallArgs}}, {{end}}orderBy, page, true)
-		if err == nil && len(prevRecords) > 0 {
-			pagination.HasPrev = true
-			if len(prevRecords) == page.Limit {
-				firstRecord := prevRecords[0]
-{{- if .ListReturnType}}
-				pagination.PreviousCursor, err = Encode{{.Name}}ResultCursor(firstRecord, orderField)
-{{- else}}
-				pagination.PreviousCursor, err = Encode{{$.EntityName}}Cursor(firstRecord, orderField)
-{{- end}}
-				if err != nil {
-					return nil, fop.Pagination{}, fmt.Errorf("encode prev cursor: %w", err)
-				}
+		if err == nil {
+			if err := fop.MarkPrevPage(&pagination, prevRecords, page.Limit, encodeCursor); err != nil {
+				return nil, fop.Pagination{}, err
 			}
 		}
 	}
@@ -472,11 +454,11 @@ package {{.PackageName}}
 import (
 	"context"
 
-	"github.com/gopernicus/gopernicus/infrastructure/cryptids"
+	"{{.FrameworkPath}}/infrastructure/cryptids"
 {{- if .HasEvents}}
-	"github.com/gopernicus/gopernicus/infrastructure/events"
+	"{{.FrameworkPath}}/infrastructure/events"
 {{- end}}
-	"github.com/gopernicus/gopernicus/sdk/fop"
+	"{{.FrameworkPath}}/sdk/fop"
 )
 
 // =============================================================================
@@ -550,7 +532,7 @@ const repoFopTemplate = `// This file is created once by gopernicus and will NOT
 
 package {{.PackageName}}
 
-import "github.com/gopernicus/gopernicus/sdk/fop"
+import "{{.FrameworkPath}}/sdk/fop"
 {{if .HasList}}
 // DefaultOrderBy is the default sort field for list operations.
 const DefaultOrderBy = {{.DefaultOrderConst}}

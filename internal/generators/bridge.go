@@ -99,7 +99,7 @@ func buildBridgeData(yml *BridgeYML, resolved *ResolvedFile, domainName, moduleP
 		BridgePackage:    BridgePackage(resolved.TableName),
 		RepoPackage:      RepoPackage(resolved.TableName),
 		ModulePath:       modulePath,
-		FrameworkPath:    goperniculusFrameworkPath,
+		FrameworkPath:    gopernicusFrameworkPath,
 		Module:           domainName,
 		EntityName:       resolved.EntityName,
 		EntityNameLower:  ToCamelCase(Singularize(resolved.TableName)),

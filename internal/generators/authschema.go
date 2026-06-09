@@ -39,7 +39,7 @@ func GenerateAuthSchema(domainDir, domainPkg, modulePath string, resolvedFiles [
 	data := AuthSchemaTemplateData{
 		DomainPkg:          domainPkg,
 		ModulePath:         modulePath,
-		FrameworkPath:      goperniculusFrameworkPath,
+		FrameworkPath:      gopernicusFrameworkPath,
 		AuthSchemaEntities: entities,
 	}
 

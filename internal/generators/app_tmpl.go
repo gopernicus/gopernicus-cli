@@ -14,38 +14,38 @@ import (
 	"syscall"
 
 	server "{{.ModulePath}}/app/server/config"
-	"github.com/gopernicus/gopernicus/infrastructure/cache"
-	"github.com/gopernicus/gopernicus/infrastructure/cache/memorycache"
+	"{{.FrameworkPath}}/infrastructure/cache"
+	"{{.FrameworkPath}}/infrastructure/cache/memorycache"
 {{- if .HasRedis}}
-	"github.com/gopernicus/gopernicus/infrastructure/cache/rediscache"
-	"github.com/gopernicus/gopernicus/infrastructure/database/kvstore/goredisdb"
+	"{{.FrameworkPath}}/infrastructure/cache/rediscache"
+	"{{.FrameworkPath}}/infrastructure/database/kvstore/goredisdb"
 {{- end}}
-	"github.com/gopernicus/gopernicus/infrastructure/communications/emailer"
-	"github.com/gopernicus/gopernicus/infrastructure/communications/emailer/stdoutemailer"
+	"{{.FrameworkPath}}/infrastructure/communications/emailer"
+	"{{.FrameworkPath}}/infrastructure/communications/emailer/stdoutemailer"
 {{- if .HasSendGrid}}
-	"github.com/gopernicus/gopernicus/infrastructure/communications/emailer/sendgridemailer"
+	"{{.FrameworkPath}}/infrastructure/communications/emailer/sendgridemailer"
 {{- end}}
-	"github.com/gopernicus/gopernicus/infrastructure/database/postgres/pgxdb"
-	"github.com/gopernicus/gopernicus/infrastructure/events"
-	"github.com/gopernicus/gopernicus/infrastructure/events/memorybus"
+	"{{.FrameworkPath}}/infrastructure/database/postgres/pgxdb"
+	"{{.FrameworkPath}}/infrastructure/events"
+	"{{.FrameworkPath}}/infrastructure/events/memorybus"
 {{- if .HasRedisStreams}}
-	"github.com/gopernicus/gopernicus/infrastructure/events/goredisbus"
+	"{{.FrameworkPath}}/infrastructure/events/goredisbus"
 {{- end}}
 {{- if .HasStorage}}
-	"github.com/gopernicus/gopernicus/infrastructure/storage"
+	"{{.FrameworkPath}}/infrastructure/storage"
 {{- end}}
 {{- if .HasStorageDisk}}
-	"github.com/gopernicus/gopernicus/infrastructure/storage/diskstorage"
+	"{{.FrameworkPath}}/infrastructure/storage/diskstorage"
 {{- end}}
 {{- if .HasStorageGCS}}
-	"github.com/gopernicus/gopernicus/infrastructure/storage/gcs"
+	"{{.FrameworkPath}}/infrastructure/storage/gcs"
 {{- end}}
 {{- if .HasStorageS3}}
-	"github.com/gopernicus/gopernicus/infrastructure/storage/s3"
+	"{{.FrameworkPath}}/infrastructure/storage/s3"
 {{- end}}
-	"github.com/gopernicus/gopernicus/infrastructure/tracing/stdouttrace"
-	"github.com/gopernicus/gopernicus/sdk/environment"
-	"github.com/gopernicus/gopernicus/sdk/logger"
+	"{{.FrameworkPath}}/infrastructure/tracing/stdouttrace"
+	"{{.FrameworkPath}}/sdk/environment"
+	"{{.FrameworkPath}}/sdk/logger"
 )
 
 var (
@@ -341,30 +341,30 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/gopernicus/gopernicus/bridge/transit/httpmid"
-	"github.com/gopernicus/gopernicus/telemetry"
+	"{{.FrameworkPath}}/bridge/transit/httpmid"
+	"{{.FrameworkPath}}/telemetry"
 {{- if .HasAuthentication}}
-	"github.com/gopernicus/gopernicus/core/auth/authentication"
+	"{{.FrameworkPath}}/core/auth/authentication"
 {{- end}}
 {{- if .HasAuthorization}}
-	"github.com/gopernicus/gopernicus/core/auth/authorization"
+	"{{.FrameworkPath}}/core/auth/authorization"
 {{- end}}
-	"github.com/gopernicus/gopernicus/infrastructure/cache"
-	"github.com/gopernicus/gopernicus/infrastructure/communications/emailer"
+	"{{.FrameworkPath}}/infrastructure/cache"
+	"{{.FrameworkPath}}/infrastructure/communications/emailer"
 {{- if .HasAuthentication}}
-	"github.com/gopernicus/gopernicus/infrastructure/cryptids/bcrypt"
-	"github.com/gopernicus/gopernicus/infrastructure/cryptids/golangjwt"
+	"{{.FrameworkPath}}/infrastructure/cryptids/bcrypt"
+	"{{.FrameworkPath}}/infrastructure/cryptids/golangjwt"
 {{- end}}
-	"github.com/gopernicus/gopernicus/infrastructure/database/postgres/pgxdb"
-	"github.com/gopernicus/gopernicus/infrastructure/events"
-	"github.com/gopernicus/gopernicus/infrastructure/ratelimiter"
-	"github.com/gopernicus/gopernicus/infrastructure/ratelimiter/memorylimiter"
+	"{{.FrameworkPath}}/infrastructure/database/postgres/pgxdb"
+	"{{.FrameworkPath}}/infrastructure/events"
+	"{{.FrameworkPath}}/infrastructure/ratelimiter"
+	"{{.FrameworkPath}}/infrastructure/ratelimiter/memorylimiter"
 {{- if .HasStorage}}
-	"github.com/gopernicus/gopernicus/infrastructure/storage"
+	"{{.FrameworkPath}}/infrastructure/storage"
 {{- end}}
-	"github.com/gopernicus/gopernicus/sdk/async"
-	"github.com/gopernicus/gopernicus/sdk/environment"
-	"github.com/gopernicus/gopernicus/sdk/web"
+	"{{.FrameworkPath}}/sdk/async"
+	"{{.FrameworkPath}}/sdk/environment"
+	"{{.FrameworkPath}}/sdk/web"
 {{- if or .HasAuthentication .HasAuthorization}}
 
 {{- if .HasAuthentication}}
@@ -1103,9 +1103,9 @@ package emails
 import (
 	"embed"
 
-	"github.com/gopernicus/gopernicus/infrastructure/communications/emailer"
+	"{{.FrameworkPath}}/infrastructure/communications/emailer"
 {{- if .HasAuthentication}}
-	authbridge "github.com/gopernicus/gopernicus/bridge/auth/authentication"
+	authbridge "{{.FrameworkPath}}/bridge/auth/authentication"
 {{- end}}
 )
 

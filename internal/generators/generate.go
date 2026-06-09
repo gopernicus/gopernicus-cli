@@ -2,7 +2,6 @@ package generators
 
 import (
 	"fmt"
-	"go/format"
 	"os"
 	"path/filepath"
 	"sort"
@@ -65,9 +64,8 @@ func Run(cfg Config) error {
 
 	// Collect entities per domain for composite generation.
 	domainEntities := make(map[string][]CompositeEntity)
-	domainBridgeEntities := make(map[string][]BridgeCompositeEntity) // entities with @http:json routes
+	domainBridgeEntities := make(map[string][]BridgeCompositeEntity) // entities with a bridge.yml
 	var allFixtureEntities []FixtureEntity // entities for fixture generation (single package, cross-domain)
-	var allE2ETestData []*E2ETestData      // E2E test data for entities with HTTP routes
 	domainDirs := make(map[string]string)                            // domain name → absolute dir path
 	domainTableNames := make(map[string]map[string]string)           // domain → (pkgName → tableName)
 	domainResolvedFiles := make(map[string][]*ResolvedFile)          // domain → resolved files (for auth schema)
@@ -134,24 +132,13 @@ func Run(cfg Config) error {
 			domainTableNames[domain][resolved.PackageName] = resolved.TableName
 			domainResolvedFiles[domain] = append(domainResolvedFiles[domain], resolved)
 
-			// Track entities that have bridge routes for bridge composite generation.
-			// In flat mode, check for bridge.yml existence instead of @http:json annotations.
-			hasBridge := resolvedHasBridgeRoutes(resolved) || fileExists(ymlPath)
-			if hasBridge {
+			// Track entities that have a bridge.yml for bridge composite generation.
+			if fileExists(ymlPath) {
 				domainBridgeEntities[domain] = append(domainBridgeEntities[domain], BuildBridgeCompositeEntity(resolved))
 			}
 
 			// Track entities for fixture generation.
 			allFixtureEntities = append(allFixtureEntities, BuildFixtureEntity(resolved, modulePath))
-
-			// Track entities with HTTP routes for E2E test generation.
-			if resolvedHasBridgeRoutes(resolved) {
-				e2eData, err := BuildE2ETestData(resolved, modulePath)
-				if err != nil {
-					return fmt.Errorf("%s: e2e test data: %w", resolved.TableName, err)
-				}
-				allE2ETestData = append(allE2ETestData, e2eData)
-			}
 		}
 	}
 
@@ -163,7 +150,7 @@ func Run(cfg Config) error {
 		data := CompositeTemplateData{
 			DomainPkg:     domain,
 			ModulePath:    modulePath,
-			FrameworkPath: goperniculusFrameworkPath,
+			FrameworkPath: gopernicusFrameworkPath,
 			DomainPath:    "core/repositories/" + domain,
 			Entities:      entities,
 			HasEvents:     true, // always available — custom methods may need the event bus
@@ -183,7 +170,7 @@ func Run(cfg Config) error {
 			CompositePkg:  BridgeCompositePackage(domain),
 			DomainName:    domain,
 			ModulePath:    modulePath,
-			FrameworkPath: goperniculusFrameworkPath,
+			FrameworkPath: gopernicusFrameworkPath,
 			Entities:      bridgeEntities,
 			AuthEnabled:   authEnabled,
 		}
@@ -233,7 +220,7 @@ func Run(cfg Config) error {
 		fixtureDir := filepath.Join(cfg.ProjectRoot, "workshop", "testing", "fixtures")
 		data := FixtureTemplateData{
 			ModulePath:    modulePath,
-			FrameworkPath: goperniculusFrameworkPath,
+			FrameworkPath: gopernicusFrameworkPath,
 			Entities:      allFixtureEntities,
 		}
 		fmt.Printf("\n  fixtures/ (test fixtures)\n")
@@ -242,44 +229,7 @@ func Run(cfg Config) error {
 		}
 	}
 
-	// Generate E2E tests (single package, one test file per entity).
-	if len(allE2ETestData) > 0 {
-		e2eDir := filepath.Join(cfg.ProjectRoot, "workshop", "testing", "e2e")
-		fmt.Printf("\n  e2e/ (E2E tests)\n")
-
-		// Generate bootstrap setup file once.
-		bootstrapData := allE2ETestData[0] // use first entity for module path info
-		bootstrapPath := filepath.Join(e2eDir, "setup_test.go")
-		if !fileExists(bootstrapPath) || opts.ForceBootstrap {
-			out, err := renderE2ETestTemplate(e2eTestBootstrapTemplate, bootstrapData)
-			if err != nil {
-				return fmt.Errorf("render setup_test.go: %w", err)
-			}
-			formatted, fmtErr := format.Source(out)
-			if fmtErr != nil {
-				formatted = out
-			}
-			if err := writeFile(bootstrapPath, formatted, opts); err != nil {
-				return fmt.Errorf("write setup_test.go: %w", err)
-			}
-		}
-
-		// Generate per-entity test files.
-		for _, data := range allE2ETestData {
-			if err := GenerateE2ETest(data, e2eDir, opts); err != nil {
-				return fmt.Errorf("e2e %s: %w", data.EntityName, err)
-			}
-		}
-	}
-
 	return nil
-}
-
-// resolvedHasBridgeRoutes returns true if any query in the resolved file has
-// annotation-based @http:json routes. Always returns false now that protocol
-// config has moved to bridge.yml; bridge.yml existence is checked separately.
-func resolvedHasBridgeRoutes(_ *ResolvedFile) bool {
-	return false
 }
 
 func generateFromQueryFile(

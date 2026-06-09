@@ -39,6 +39,9 @@ type IntegrationTestMethod struct {
 
 // IntegrationTestData holds all data for rendering a pgxstore integration test.
 type IntegrationTestData struct {
+	// FrameworkPath is the gopernicus framework module path (for sdk, testing imports).
+	FrameworkPath string
+
 	// Package info
 	StorePkg   string // e.g. "userspgx"
 	RepoPkg    string // e.g. "users"
@@ -85,6 +88,7 @@ type IntegrationTestData struct {
 // BuildIntegrationTestData creates test data from a resolved file.
 func BuildIntegrationTestData(resolved *ResolvedFile, modulePath string) (IntegrationTestData, error) {
 	data := IntegrationTestData{
+		FrameworkPath: gopernicusFrameworkPath,
 		StorePkg:      resolved.StorePkg,
 		RepoPkg:       resolved.PackageName,
 		EntityName:    resolved.EntityName,

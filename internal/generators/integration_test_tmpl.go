@@ -18,10 +18,10 @@ import (
 {{end}}
 	fixtures "{{.FixtureImport}}"
 
-	"github.com/gopernicus/gopernicus/workshop/testing/pgxfixtures"
-	"github.com/gopernicus/gopernicus/workshop/testing/testpgx"
-{{if .HasList}}	"github.com/gopernicus/gopernicus/sdk/fop"
-{{end}}	"github.com/gopernicus/gopernicus/sdk/logger"
+	"{{.FrameworkPath}}/workshop/testing/pgxfixtures"
+	"{{.FrameworkPath}}/workshop/testing/testpgx"
+{{if .HasList}}	"{{.FrameworkPath}}/sdk/fop"
+{{end}}	"{{.FrameworkPath}}/sdk/logger"
 )
 
 // Ensure imports are used.
@@ -176,8 +176,8 @@ package {{.StorePkg}}
 import (
 	"context"
 
-	"github.com/gopernicus/gopernicus/infrastructure/database/postgres/pgxdb"
-	"github.com/gopernicus/gopernicus/workshop/testing/testpgx"
+	"{{.FrameworkPath}}/infrastructure/database/postgres/pgxdb"
+	"{{.FrameworkPath}}/workshop/testing/testpgx"
 )
 
 // migrateTestDB runs migrations for the test database.

@@ -1,9 +1,9 @@
 package generators
 
-// goperniculusFrameworkPath is the canonical module path for the gopernicus framework.
+// gopernicusFrameworkPath is the canonical module path for the gopernicus framework.
 // Framework packages (sdk, bridge/transit, core/auth, infrastructure) always use this
 // path regardless of the project module path.
-const goperniculusFrameworkPath = "github.com/gopernicus/gopernicus"
+const gopernicusFrameworkPath = "github.com/gopernicus/gopernicus"
 
 // BridgeTemplateData holds all data needed for bridge template rendering.
 type BridgeTemplateData struct {
@@ -31,7 +31,7 @@ type BridgeTemplateData struct {
 	CreateQueries []BridgeCreateQuery
 	UpdateQueries []BridgeUpdateQuery
 
-	// Routes (built from @http:json annotations)
+	// Routes (built from bridge.yml route entries)
 	Routes []BridgeRoute
 
 	// Feature flags (from gopernicus.yml features section)
@@ -113,9 +113,9 @@ type BridgeField struct {
 	IsUUID  bool // DB type is uuid
 }
 
-// BridgeRoute represents a single HTTP route generated from an @http:json annotation.
+// BridgeRoute represents a single HTTP route generated from a bridge.yml route entry.
 type BridgeRoute struct {
-	// From @http:json annotation
+	// From the bridge.yml route entry
 	Method string // "GET"
 	Path   string // "/tenants/:tenant_id"
 

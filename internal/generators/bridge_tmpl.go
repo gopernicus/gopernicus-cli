@@ -139,6 +139,9 @@ func (b *Bridge) {{.HandlerName}}(w http.ResponseWriter, r *http.Request) {
 		r.Context(), b.authorizer, postfilterSubject,
 		"{{.Authorize.Permission}}", "{{$.EntitySingular}}",
 		func(rec {{$.RepoPackage}}.{{$.EntityName}}) string { return rec.{{$.PKGoName}} },
+		func(rec {{$.RepoPackage}}.{{$.EntityName}}) (string, error) {
+			return {{$.RepoPackage}}.Encode{{$.EntityName}}Cursor(rec, orderBy.Field)
+		},
 		func(ctx context.Context, p fop.PageStringCursor) ([]{{$.RepoPackage}}.{{$.EntityName}}, fop.Pagination, error) {
 			return b.{{$.EntityNameLower}}Repository.{{.FuncName}}(ctx, filter, {{range .RepoCallParams}}{{.GoName}}, {{end}}orderBy, p)
 		},

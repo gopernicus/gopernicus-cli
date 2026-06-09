@@ -3,6 +3,7 @@ package generators
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -547,12 +548,20 @@ func buildColumnMap(table *schema.TableInfo) map[string]schema.ColumnInfo {
 }
 
 // buildAllColumnMap builds a flat column lookup across all tables in the schema.
-// If multiple tables share a column name, the first one wins — the primary
-// table's colMap is always checked first during resolution.
+// Tables are visited in sorted name order so that when multiple tables share a
+// column name the same one wins on every run — Go map iteration order would
+// otherwise make cross-table type resolution nondeterministic between runs.
+// The primary table's colMap is always checked first during resolution.
 func buildAllColumnMap(tables map[string]*schema.TableInfo) map[string]schema.ColumnInfo {
+	names := make([]string, 0, len(tables))
+	for name := range tables {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
 	m := make(map[string]schema.ColumnInfo)
-	for _, t := range tables {
-		for _, col := range t.Columns {
+	for _, name := range names {
+		for _, col := range tables[name].Columns {
 			if _, exists := m[col.Name]; !exists {
 				m[col.Name] = col
 			}

@@ -103,6 +103,7 @@ type RepoEventInfo struct {
 
 // RepoTemplateData holds all data needed to render repository templates.
 type RepoTemplateData struct {
+	FrameworkPath    string // gopernicus framework module path (for sdk, infra imports)
 	PackageName      string
 	EntityName       string
 	EntityNameLower  string
@@ -442,6 +443,7 @@ func buildRepoTemplateData(resolved *ResolvedFile) (RepoTemplateData, error) {
 	}
 
 	return RepoTemplateData{
+		FrameworkPath:     gopernicusFrameworkPath,
 		PackageName:       resolved.PackageName,
 		EntityName:        resolved.EntityName,
 		EntityNameLower:   resolved.EntityLower,

@@ -10,6 +10,10 @@ import (
 
 // AppScaffoldData holds the template data for generating app bootstrap files.
 type AppScaffoldData struct {
+	// FrameworkPath is the gopernicus framework module path used in generated
+	// imports. Defaults to the canonical path when empty.
+	FrameworkPath string
+
 	// ProjectName is the directory/project name (e.g., "myapp").
 	ProjectName string
 
@@ -49,6 +53,10 @@ type AppScaffoldData struct {
 //
 // These are bootstrap files — they are only created if they don't already exist.
 func GenerateAppScaffold(root string, data AppScaffoldData) error {
+	if data.FrameworkPath == "" {
+		data.FrameworkPath = gopernicusFrameworkPath
+	}
+
 	// templatedFiles are rendered through text/template before writing.
 	templatedFiles := []struct {
 		relPath  string
