@@ -27,6 +27,7 @@ type CompositeTemplateData struct {
 	Entities      []CompositeEntity // sorted by FieldName
 	HasEvents     bool              // true if any entity in this domain has events
 	HasAuth       bool              // true if domain has authorization schema (@auth.relation/@auth.permission annotations)
+	SpecMode      bool              // true when the domain's database uses the spec store mode
 }
 
 // GenerateComposite produces domain-level composite wiring files.
@@ -47,8 +48,13 @@ func GenerateComposite(data CompositeTemplateData, domainDir string, opts Option
 		bootstrap bool
 	}
 
+	compositeTmpl := compositeGeneratedTemplate
+	if data.SpecMode {
+		compositeTmpl = compositeSpecGeneratedTemplate
+	}
+
 	genFiles := []genFile{
-		{"generated_composite.go", compositeGeneratedTemplate, false},
+		{"generated_composite.go", compositeTmpl, false},
 	}
 
 	for _, f := range genFiles {

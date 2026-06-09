@@ -273,9 +273,10 @@ func runDBCreate(_ context.Context, args []string) error {
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-// connectDriver loads the manifest, resolves the DB URL, connects, and pings.
-// The dbName selects which database from the manifest (defaults to "primary").
-// Returns the driver, project root, and manifest. The caller must call driver.Close().
+// connectDriver loads the manifest, validates the database driver, resolves
+// the DB URL, connects, and pings. The --db flag selects which database from
+// the manifest (defaults to "primary"). Returns the driver, project root, and
+// manifest. The caller must call driver.Close().
 func connectDriver(ctx context.Context, args []string) (*pgxdb.Driver, string, *manifest.Manifest, error) {
 	root, err := project.MustFindRoot()
 	if err != nil {
@@ -285,6 +286,18 @@ func connectDriver(ctx context.Context, args []string) (*pgxdb.Driver, string, *
 	m, err := manifest.Load(root)
 	if err != nil {
 		return nil, "", nil, err
+	}
+
+	dbName := dbNameFromArgs(args)
+	driverName, err := m.DatabaseOrDefault(dbName).DriverOrDefault()
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("database %q: %w", dbName, err)
+	}
+	if driverName == manifest.DriverSQLite {
+		return nil, "", nil, fmt.Errorf(
+			"database %q uses driver %q: sqlite migrations and reflection are not yet supported — planned for Phase 2",
+			dbName, manifest.DriverSQLite,
+		)
 	}
 
 	dbURL, err := resolveDBURL(args, m, root)

@@ -1,4 +1,23 @@
 // Package manifest handles reading and writing the gopernicus.yml project manifest.
+//
+// # Database driver and store mode
+//
+// Each database declares a driver, which selects both the connection adapter
+// and the default generation store mode for every repository bound to it:
+//
+//	databases:
+//	  primary:
+//	    driver: postgres   # default — generates the pgx store
+//	    store: spec        # optional opt-in to the dialect-neutral spec store
+//	  embedded:
+//	    driver: sqlite     # always uses the spec store mode
+//
+// Recognized drivers are "postgres" (the default; the legacy "postgres/pgx"
+// spelling from earlier scaffolds is accepted) and "sqlite". The optional
+// `store` key is only meaningful for postgres: "pgx" (the default) generates
+// the pgx-coupled store, "spec" generates the dialect-neutral crud spec
+// store. sqlite has no pgx store, so it always resolves to spec mode and
+// rejects `store: pgx`.
 package manifest
 
 import (
@@ -9,6 +28,29 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+)
+
+// Recognized database drivers (DatabaseConfig.Driver).
+const (
+	// DriverPostgres is the default driver.
+	DriverPostgres = "postgres"
+	// DriverSQLite always resolves to the spec store mode.
+	DriverSQLite = "sqlite"
+
+	// driverPostgresPgx is the legacy spelling written by earlier scaffolds;
+	// it normalizes to DriverPostgres.
+	driverPostgresPgx = "postgres/pgx"
+)
+
+// StoreMode selects which data-layer generator runs for a database's
+// repositories.
+type StoreMode string
+
+const (
+	// StoreModePgx generates the pgx-coupled store (postgres only).
+	StoreModePgx StoreMode = "pgx"
+	// StoreModeSpec generates the dialect-neutral crud spec store.
+	StoreModeSpec StoreMode = "spec"
 )
 
 // Feature represents a feature toggle that can be a bool or a provider string.
@@ -57,7 +99,6 @@ type Manifest struct {
 	Databases         map[string]*DatabaseConfig `yaml:"databases,omitempty"`
 	Features          *FeaturesConfig            `yaml:"features,omitempty"`
 	Events            *EventsConfig              `yaml:"events,omitempty"`
-
 }
 
 // EventsConfig configures the event infrastructure for a gopernicus project.
@@ -87,8 +128,14 @@ func (e *EventsConfig) JobQueueEnabled() bool {
 
 // DatabaseConfig defines a named database connection.
 type DatabaseConfig struct {
-	// Driver identifies the database adapter (e.g., "postgres/pgx").
+	// Driver identifies the database adapter: "postgres" (default) or
+	// "sqlite". The legacy "postgres/pgx" spelling normalizes to "postgres".
 	Driver string `yaml:"driver"`
+
+	// Store opts a postgres database into a generation store mode: "pgx"
+	// (default) or "spec" (the dialect-neutral crud store). Databases with
+	// driver "sqlite" always use spec mode and reject "pgx".
+	Store string `yaml:"store,omitempty"`
 
 	// URLEnvVar is the environment variable name holding the connection URL
 	// (e.g., "DATABASE_URL"). Looked up directly — no namespace prefix.
@@ -100,6 +147,66 @@ type DatabaseConfig struct {
 	// Domains maps domain names to table lists for organizing repositories.
 	// e.g. auth: [users, principals, credentials]
 	Domains map[string][]string `yaml:"domains,omitempty"`
+}
+
+// DriverOrDefault returns the validated, normalized driver name. A nil
+// config or empty driver defaults to DriverPostgres; the legacy
+// "postgres/pgx" spelling normalizes to DriverPostgres. Unrecognized
+// drivers return an error.
+func (d *DatabaseConfig) DriverOrDefault() (string, error) {
+	if d == nil {
+		return DriverPostgres, nil
+	}
+	switch d.Driver {
+	case "", DriverPostgres, driverPostgresPgx:
+		return DriverPostgres, nil
+	case DriverSQLite:
+		return DriverSQLite, nil
+	default:
+		return "", fmt.Errorf(
+			"unrecognized database driver %q (recognized: %q, %q)",
+			d.Driver, DriverPostgres, DriverSQLite,
+		)
+	}
+}
+
+// StoreMode resolves the generation store mode from the driver and the
+// optional store key: sqlite always uses StoreModeSpec; postgres defaults to
+// StoreModePgx unless `store: spec` opts in.
+func (d *DatabaseConfig) StoreMode() (StoreMode, error) {
+	driver, err := d.DriverOrDefault()
+	if err != nil {
+		return "", err
+	}
+
+	store := ""
+	if d != nil {
+		store = d.Store
+	}
+
+	if driver == DriverSQLite {
+		switch store {
+		case "", string(StoreModeSpec):
+			return StoreModeSpec, nil
+		default:
+			return "", fmt.Errorf(
+				"driver %q always uses store mode %q; remove `store: %s`",
+				DriverSQLite, StoreModeSpec, store,
+			)
+		}
+	}
+
+	switch store {
+	case "", string(StoreModePgx):
+		return StoreModePgx, nil
+	case string(StoreModeSpec):
+		return StoreModeSpec, nil
+	default:
+		return "", fmt.Errorf(
+			"unrecognized store mode %q (recognized: %q, %q)",
+			store, StoreModePgx, StoreModeSpec,
+		)
+	}
 }
 
 // SchemasOrDefault returns the configured schemas, defaulting to ["public"].
@@ -217,7 +324,7 @@ func NewWithProject(projectName string) *Manifest {
 		EnvFile:           ".env",
 		Databases: map[string]*DatabaseConfig{
 			"primary": {
-				Driver:    "postgres/pgx",
+				Driver:    DriverPostgres,
 				URLEnvVar: urlEnvVar,
 			},
 		},

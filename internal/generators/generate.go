@@ -65,7 +65,7 @@ func Run(cfg Config) error {
 	// Collect entities per domain for composite generation.
 	domainEntities := make(map[string][]CompositeEntity)
 	domainBridgeEntities := make(map[string][]BridgeCompositeEntity) // entities with a bridge.yml
-	var allFixtureEntities []FixtureEntity // entities for fixture generation (single package, cross-domain)
+	var allFixtureEntities []FixtureEntity                           // entities for fixture generation (single package, cross-domain)
 	domainDirs := make(map[string]string)                            // domain name → absolute dir path
 	domainTableNames := make(map[string]map[string]string)           // domain → (pkgName → tableName)
 	domainResolvedFiles := make(map[string][]*ResolvedFile)          // domain → resolved files (for auth schema)
@@ -73,8 +73,10 @@ func Run(cfg Config) error {
 	authEnabled := cfg.Manifest.Features.AuthenticationEnabled()
 	authzProvider := cfg.Manifest.Features.AuthorizationProvider()
 
+	domainStoreModes := make(map[string]manifest.StoreMode) // domain → resolved store mode
+
 	for _, qfPath := range queryFiles {
-		resolved, err := generateFromQueryFile(qfPath, schemas, modulePath, cfg.ProjectRoot, authEnabled, opts)
+		resolved, storeMode, err := generateFromQueryFile(qfPath, schemas, cfg.Manifest, modulePath, cfg.ProjectRoot, authEnabled, opts)
 		if err != nil {
 			return fmt.Errorf("%s: %w", qfPath, err)
 		}
@@ -122,6 +124,14 @@ func Run(cfg Config) error {
 
 		domain := resolved.DomainName
 		if domain != "" {
+			if prev, ok := domainStoreModes[domain]; ok && prev != storeMode {
+				return fmt.Errorf(
+					"domain %q mixes store modes (%s and %s); all entities in a domain must share one store mode",
+					domain, prev, storeMode,
+				)
+			}
+			domainStoreModes[domain] = storeMode
+
 			domainEntities[domain] = append(domainEntities[domain], BuildCompositeEntity(resolved))
 			if _, ok := domainDirs[domain]; !ok {
 				domainDirs[domain] = filepath.Join(repoRoot, domain)
@@ -155,6 +165,7 @@ func Run(cfg Config) error {
 			Entities:      entities,
 			HasEvents:     true, // always available — custom methods may need the event bus
 			HasAuth:       hasAuthProvider,
+			SpecMode:      domainStoreModes[domain] == manifest.StoreModeSpec,
 		}
 		fmt.Printf("\n  %s/ (domain composite)\n", domain)
 		if err := GenerateComposite(data, domainDir, opts); err != nil {
@@ -235,13 +246,19 @@ func Run(cfg Config) error {
 func generateFromQueryFile(
 	qfPath string,
 	schemas map[string]*schema.ReflectedSchema,
+	m *manifest.Manifest,
 	modulePath, projectRoot string,
 	authEnabled bool,
 	opts Options,
-) (*ResolvedFile, error) {
+) (*ResolvedFile, manifest.StoreMode, error) {
 	qf, err := Parse(qfPath)
 	if err != nil {
-		return nil, err
+		return nil, "", err
+	}
+
+	storeMode, err := m.DatabaseOrDefault(qf.Database).StoreMode()
+	if err != nil {
+		return nil, "", fmt.Errorf("database %q: %w", qf.Database, err)
 	}
 
 	repoDir := filepath.Dir(qfPath)
@@ -252,14 +269,14 @@ func generateFromQueryFile(
 		if opts.Verbose {
 			fmt.Printf("  skip %s (no matching table in schema)\n", dirName)
 		}
-		return nil, nil
+		return nil, "", nil
 	}
 	qf.Table = tableName
 
 	key := qf.Database + ":" + schemaName
 	s, ok := schemas[key]
 	if !ok {
-		return nil, fmt.Errorf(
+		return nil, "", fmt.Errorf(
 			"reflected schema for database %q schema %q not found\n\n"+
 				"Run 'gopernicus db reflect' to generate it.",
 			qf.Database, schemaName,
@@ -270,61 +287,76 @@ func generateFromQueryFile(
 
 	resolved, err := Resolve(qf, s, domainName)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	fmt.Printf("\n  %s (table: %s)\n", filepath.Base(repoDir), resolved.TableName)
 
 	// Generate repository layer.
 	if err := GenerateRepository(resolved, repoDir, opts); err != nil {
-		return nil, fmt.Errorf("repository: %w", err)
+		return nil, "", fmt.Errorf("repository: %w", err)
 	}
 
-	// Generate pgxstore layer.
-	if err := GeneratePgxStore(resolved, domainName, modulePath, projectRoot, opts); err != nil {
-		return nil, fmt.Errorf("pgxstore: %w", err)
-	}
+	// Generate the store layer per the database's store mode.
+	switch storeMode {
+	case manifest.StoreModeSpec:
+		// Composite wiring imports the spec store package, not the pgx one.
+		resolved.StorePkg = StorePackage(resolved.TableName, specStorePackageSuffix)
 
-	// Generate pgxstore integration tests, unless the entity opted out via
-	// `-- @skip-integration-test` in queries.sql. When skipped, remove any
-	// previously generated test file so a stale copy doesn't linger and
-	// keep failing.
-	storeDir := StoreDir(domainName, resolved.TableName, "pgx", projectRoot)
-	if resolved.SkipIntegrationTest {
-		stalePath := filepath.Join(storeDir, "generated_test.go")
-		if fileExists(stalePath) && !opts.DryRun {
-			if err := os.Remove(stalePath); err != nil {
-				return nil, fmt.Errorf("remove stale generated_test.go: %w", err)
-			}
-			if opts.Verbose {
-				fmt.Printf("      removed %s (skip-integration-test)\n", stalePath)
-			}
+		if err := GenerateSpecStore(resolved, repoDir, modulePath, opts); err != nil {
+			return nil, "", fmt.Errorf("specstore: %w", err)
 		}
-	} else {
-		testData, err := BuildIntegrationTestData(resolved, modulePath)
-		if err != nil {
-			return nil, fmt.Errorf("integration test data: %w", err)
+
+		// Integration test generation is pgx-coupled (testcontainers + pgx
+		// fixtures) and has no spec-mode equivalent yet.
+		fmt.Printf("      note: integration test generation is pgx-only — skipped in spec store mode\n")
+
+	default: // manifest.StoreModePgx
+		if err := GeneratePgxStore(resolved, domainName, modulePath, projectRoot, opts); err != nil {
+			return nil, "", fmt.Errorf("pgxstore: %w", err)
 		}
-		if err := GenerateIntegrationTest(testData, storeDir, opts); err != nil {
-			return nil, fmt.Errorf("integration tests: %w", err)
+
+		// Generate pgxstore integration tests, unless the entity opted out via
+		// `-- @skip-integration-test` in queries.sql. When skipped, remove any
+		// previously generated test file so a stale copy doesn't linger and
+		// keep failing.
+		storeDir := StoreDir(domainName, resolved.TableName, "pgx", projectRoot)
+		if resolved.SkipIntegrationTest {
+			stalePath := filepath.Join(storeDir, "generated_test.go")
+			if fileExists(stalePath) && !opts.DryRun {
+				if err := os.Remove(stalePath); err != nil {
+					return nil, "", fmt.Errorf("remove stale generated_test.go: %w", err)
+				}
+				if opts.Verbose {
+					fmt.Printf("      removed %s (skip-integration-test)\n", stalePath)
+				}
+			}
+		} else {
+			testData, err := BuildIntegrationTestData(resolved, modulePath)
+			if err != nil {
+				return nil, "", fmt.Errorf("integration test data: %w", err)
+			}
+			if err := GenerateIntegrationTest(testData, storeDir, opts); err != nil {
+				return nil, "", fmt.Errorf("integration tests: %w", err)
+			}
 		}
 	}
 
 	// Generate cache layer (only if any @cache annotations exist).
 	if generated, err := GenerateCache(resolved, repoDir, opts); err != nil {
-		return nil, fmt.Errorf("cache: %w", err)
+		return nil, "", fmt.Errorf("cache: %w", err)
 	} else if generated && opts.Verbose {
 		fmt.Printf("    generated cache layer\n")
 	}
 
 	// Generate bridge layer (from bridge.yml).
 	if generated, err := GenerateBridge(resolved, domainName, modulePath, projectRoot, authEnabled, opts); err != nil {
-		return nil, fmt.Errorf("bridge: %w", err)
+		return nil, "", fmt.Errorf("bridge: %w", err)
 	} else if generated && opts.Verbose {
 		fmt.Printf("    generated bridge layer\n")
 	}
 
-	return resolved, nil
+	return resolved, storeMode, nil
 }
 
 // resolveForFixture parses and resolves a queries.sql file without running

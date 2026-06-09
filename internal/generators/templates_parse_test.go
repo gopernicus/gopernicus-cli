@@ -56,6 +56,7 @@ func TestTemplatesParse(t *testing.T) {
 		{"bridgeHttp", bridgeHttpTemplate, bridgeFuncs},
 		{"bridgeFop", bridgeFopTemplate, bridgeFuncs},
 		{"compositeGenerated", compositeGeneratedTemplate, nil},
+		{"compositeSpecGenerated", compositeSpecGeneratedTemplate, nil},
 		{"bridgeCompositeGenerated", bridgeCompositeGeneratedTemplate, nil},
 		{"integrationTestGenerated", integrationTestGeneratedTemplate, integrationFuncs},
 		{"integrationTestBootstrap", integrationTestBootstrapTemplate, integrationFuncs},
