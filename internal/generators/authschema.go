@@ -3,7 +3,6 @@ package generators
 import (
 	"bytes"
 	"fmt"
-	"go/format"
 	"path/filepath"
 	"text/template"
 
@@ -68,14 +67,7 @@ func GenerateAuthSchema(domainDir, domainPkg, modulePath string, resolvedFiles [
 			return fmt.Errorf("render %s for %s: %w", f.name, domainPkg, err)
 		}
 
-		formatted, err := format.Source(out)
-		if err != nil {
-			// Write unformatted for debugging.
-			_ = writeFile(path, out, opts)
-			return fmt.Errorf("go/format %s: %w\nUnformatted output written for debugging.", f.name, err)
-		}
-
-		if err := writeFile(path, formatted, opts); err != nil {
+		if err := renderGoFile(f.name, out, path, opts); err != nil {
 			return err
 		}
 

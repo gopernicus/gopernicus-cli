@@ -82,24 +82,7 @@ Override the env file path in gopernicus.yml:
 }
 
 func runDB(_ context.Context, args []string) error {
-	if len(args) == 0 {
-		printCommandHelp(dbCmd)
-		return nil
-	}
-	name := args[0]
-	for _, sub := range dbCmd.SubCommands {
-		if sub.Name == name {
-			rest := args[1:]
-			for _, a := range rest {
-				if a == "-h" || a == "--help" {
-					printCommandHelp(sub)
-					return nil
-				}
-			}
-			return sub.Run(context.Background(), rest)
-		}
-	}
-	return fmt.Errorf("unknown db subcommand %q\n\nRun 'gopernicus db --help' for usage.", name)
+	return dispatchSub(dbCmd, args)
 }
 
 func runDBMigrate(ctx context.Context, args []string) error {
@@ -176,12 +159,7 @@ func runDBReflect(ctx context.Context, args []string) error {
 }
 
 func runDBStatus(ctx context.Context, args []string) error {
-	root, err := project.MustFindRoot()
-	if err != nil {
-		return err
-	}
-
-	m, err := manifest.Load(root)
+	root, m, err := loadProject()
 	if err != nil {
 		return err
 	}
@@ -253,19 +231,7 @@ func runDBCreate(_ context.Context, args []string) error {
 	dbName := dbNameFromArgs(args)
 
 	// Filter out flags to find the migration name.
-	var name string
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--db" {
-			i++ // skip value
-			continue
-		}
-		if strings.HasPrefix(args[i], "--db=") {
-			continue
-		}
-		if !strings.HasPrefix(args[i], "-") && name == "" {
-			name = args[i]
-		}
-	}
+	name := firstPositional(args, "--db")
 
 	if name == "" {
 		return fmt.Errorf("migration name required\n\nUsage: gopernicus db create <name> [--db <database>]")
@@ -312,12 +278,7 @@ func runDBCreate(_ context.Context, args []string) error {
 // createIfMissing applies to sqlite only: when true (db migrate), a missing
 // database file is created; when false (db reflect), it is an error.
 func connectDriver(ctx context.Context, args []string, createIfMissing bool) (database.Driver, string, *manifest.Manifest, error) {
-	root, err := project.MustFindRoot()
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	m, err := manifest.Load(root)
+	root, m, err := loadProject()
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -423,6 +384,33 @@ func fileOnlyStatus(dir string) ([]database.MigrationStatus, error) {
 		}
 	}
 	return out, nil
+}
+
+// firstPositional returns the first non-flag argument, skipping each flag in
+// valueFlags together with its following value (and its --flag=value form) as
+// well as any other dash-prefixed argument. Returns "" when none is found.
+func firstPositional(args []string, valueFlags ...string) string {
+	for i := 0; i < len(args); i++ {
+		skipped := false
+		for _, flag := range valueFlags {
+			if args[i] == flag {
+				i++ // skip value
+				skipped = true
+				break
+			}
+			if strings.HasPrefix(args[i], flag+"=") {
+				skipped = true
+				break
+			}
+		}
+		if skipped {
+			continue
+		}
+		if !strings.HasPrefix(args[i], "-") {
+			return args[i]
+		}
+	}
+	return ""
 }
 
 // flagValue extracts --flag <value> or --flag=<value> from args.

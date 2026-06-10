@@ -10,7 +10,6 @@ import (
 	"github.com/gopernicus/gopernicus-cli/internal/fwsource"
 	"github.com/gopernicus/gopernicus-cli/internal/generators"
 	"github.com/gopernicus/gopernicus-cli/internal/manifest"
-	"github.com/gopernicus/gopernicus-cli/internal/project"
 	"github.com/gopernicus/gopernicus-cli/internal/schema"
 )
 
@@ -49,49 +48,16 @@ Examples:
 }
 
 func runBoot(_ context.Context, args []string) error {
-	if len(args) == 0 {
-		printCommandHelp(bootCmd)
-		return nil
-	}
-	name := args[0]
-	for _, sub := range bootCmd.SubCommands {
-		if sub.Name == name {
-			rest := args[1:]
-			for _, a := range rest {
-				if a == "-h" || a == "--help" {
-					printCommandHelp(sub)
-					return nil
-				}
-			}
-			return sub.Run(context.Background(), rest)
-		}
-	}
-	return fmt.Errorf("unknown boot subcommand %q\n\nRun 'gopernicus boot --help' for usage.", name)
+	return dispatchSub(bootCmd, args)
 }
 
 func runBootRepos(_ context.Context, args []string) error {
 	dbName := flagValue(args, "--db")
 
 	// Parse optional domain argument (first positional arg).
-	var domainFilter string
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--db" {
-			i++
-			continue
-		}
-		if strings.HasPrefix(args[i], "--db=") {
-			continue
-		}
-		if !strings.HasPrefix(args[i], "-") && domainFilter == "" {
-			domainFilter = args[i]
-		}
-	}
+	domainFilter := firstPositional(args, "--db")
 
-	root, err := project.MustFindRoot()
-	if err != nil {
-		return err
-	}
-	m, err := manifest.Load(root)
+	root, m, err := loadProject()
 	if err != nil {
 		return err
 	}

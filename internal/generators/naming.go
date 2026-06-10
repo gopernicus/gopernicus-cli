@@ -124,6 +124,16 @@ func RepoDir(domainName, tableName, outputDir string) string {
 	return filepath.Join(outputDir, "core", "repositories", domainName, ToPackageName(tableName))
 }
 
+// RepoImportPath returns the import path for an entity's repository package.
+func RepoImportPath(modulePath, domainName, repoPkg string) string {
+	return modulePath + "/core/repositories/" + domainName + "/" + repoPkg
+}
+
+// StoreImportPath returns the import path for an entity's store package.
+func StoreImportPath(modulePath, domainName, repoPkg, storePkg string) string {
+	return RepoImportPath(modulePath, domainName, repoPkg) + "/" + storePkg
+}
+
 // StorePackage returns the Go package name for a driver-specific store.
 func StorePackage(tableName, driverSuffix string) string {
 	return ToPackageName(tableName) + driverSuffix

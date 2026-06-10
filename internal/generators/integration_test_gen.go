@@ -3,7 +3,6 @@ package generators
 import (
 	"bytes"
 	"fmt"
-	"go/format"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -119,18 +118,19 @@ type IntegrationTestData struct {
 // the manifest database hosting this store — it locates the migrations dir
 // the bootstrapped migrateTestDB applies.
 func BuildIntegrationTestData(resolved *ResolvedFile, modulePath, dbName string) (IntegrationTestData, error) {
+	wiring := buildStackWiring(resolved, modulePath, dbName, false)
 	data := IntegrationTestData{
 		FrameworkPath: gopernicusFrameworkPath,
-		StorePkg:      resolved.StorePkg,
-		RepoPkg:       resolved.PackageName,
+		StorePkg:      wiring.StorePkg,
+		RepoPkg:       wiring.RepoPkg,
 		EntityName:    resolved.EntityName,
 		EntityLower:   resolved.EntityLower,
-		RepoImport:    modulePath + "/core/repositories/" + resolved.DomainName + "/" + resolved.PackageName,
+		RepoImport:    wiring.RepoImport,
 		FixtureImport: modulePath + "/workshop/testing/fixtures",
 		PKColumn:      resolved.PKColumn,
 		PKGoName:      resolved.PKGoName,
 		PKGoType:      resolved.PKGoType,
-		MigrationsDir: "workshop/migrations/" + dbName,
+		MigrationsDir: wiring.MigrationsDir,
 		DomainName:    resolved.DomainName,
 	}
 
@@ -371,13 +371,7 @@ func generateIntegrationTestWith(data IntegrationTestData, storeDir, generatedTm
 			return fmt.Errorf("render %s for %s: %w", f.name, data.StorePkg, err)
 		}
 
-		formatted, err := format.Source(out)
-		if err != nil {
-			_ = writeFile(path, out, opts)
-			return fmt.Errorf("go/format %s: %w\nUnformatted output written for debugging.", f.name, err)
-		}
-
-		if err := writeFile(path, formatted, opts); err != nil {
+		if err := renderGoFile(f.name, out, path, opts); err != nil {
 			return err
 		}
 	}

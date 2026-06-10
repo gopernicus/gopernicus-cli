@@ -3,7 +3,6 @@ package generators
 import (
 	"bytes"
 	"fmt"
-	"go/format"
 	"os"
 	"path/filepath"
 	"sort"
@@ -101,13 +100,7 @@ func GenerateComposite(data CompositeTemplateData, domainDir string, opts Option
 			return fmt.Errorf("render %s for %s: %w", f.name, data.DomainPkg, err)
 		}
 
-		formatted, err := format.Source(out)
-		if err != nil {
-			_ = writeFile(path, out, opts)
-			return fmt.Errorf("go/format %s: %w\nUnformatted output written for debugging.", f.name, err)
-		}
-
-		if err := writeFile(path, formatted, opts); err != nil {
+		if err := renderGoFile(f.name, out, path, opts); err != nil {
 			return err
 		}
 	}
@@ -205,12 +198,7 @@ func renderCompositeFile(tmplStr string, data any, path string, opts Options) er
 	if err != nil {
 		return fmt.Errorf("render %s: %w", filepath.Base(path), err)
 	}
-	formatted, err := format.Source(out)
-	if err != nil {
-		_ = writeFile(path, out, opts)
-		return fmt.Errorf("go/format %s: %w\nUnformatted output written for debugging.", filepath.Base(path), err)
-	}
-	return writeFile(path, formatted, opts)
+	return renderGoFile(filepath.Base(path), out, path, opts)
 }
 
 // removeStaleDBCompositeFiles deletes generated_composite_<db>.go files this

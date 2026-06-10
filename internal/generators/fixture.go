@@ -3,7 +3,6 @@ package generators
 import (
 	"bytes"
 	"fmt"
-	"go/format"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -538,13 +537,7 @@ func generateFixturesWith(data FixtureTemplateData, fixtureDir, generatedTmpl, b
 			return fmt.Errorf("render %s: %w", f.name, err)
 		}
 
-		formatted, err := format.Source(out)
-		if err != nil {
-			_ = writeFile(path, out, opts)
-			return fmt.Errorf("go/format %s: %w\nUnformatted output written for debugging.", f.name, err)
-		}
-
-		if err := writeFile(path, formatted, opts); err != nil {
+		if err := renderGoFile(f.name, out, path, opts); err != nil {
 			return err
 		}
 	}

@@ -6,6 +6,9 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
+
+	"github.com/gopernicus/gopernicus-cli/internal/manifest"
+	"github.com/gopernicus/gopernicus-cli/internal/project"
 )
 
 // Version is set at build time via -ldflags, falls back to VCS info.
@@ -121,6 +124,43 @@ Flags:
 
 Run 'gopernicus <command> --help' for more information about a command.
 `)
+}
+
+// dispatchSub routes args to one of parent's subcommands: no args prints the
+// parent's help, -h/--help after the subcommand name prints the subcommand's
+// help, and an unknown name is an error.
+func dispatchSub(parent *Command, args []string) error {
+	if len(args) == 0 {
+		printCommandHelp(parent)
+		return nil
+	}
+	name := args[0]
+	for _, sub := range parent.SubCommands {
+		if sub.Name == name {
+			rest := args[1:]
+			for _, a := range rest {
+				if a == "-h" || a == "--help" {
+					printCommandHelp(sub)
+					return nil
+				}
+			}
+			return sub.Run(context.Background(), rest)
+		}
+	}
+	return fmt.Errorf("unknown %s subcommand %q\n\nRun 'gopernicus %s --help' for usage.", parent.Name, name, parent.Name)
+}
+
+// loadProject locates the project root and loads its manifest.
+func loadProject() (string, *manifest.Manifest, error) {
+	root, err := project.MustFindRoot()
+	if err != nil {
+		return "", nil, err
+	}
+	m, err := manifest.Load(root)
+	if err != nil {
+		return "", nil, err
+	}
+	return root, m, nil
 }
 
 func printCommandHelp(c *Command) {

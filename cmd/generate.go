@@ -5,8 +5,6 @@ import (
 	"fmt"
 
 	"github.com/gopernicus/gopernicus-cli/internal/generators"
-	"github.com/gopernicus/gopernicus-cli/internal/manifest"
-	"github.com/gopernicus/gopernicus-cli/internal/project"
 )
 
 func init() {
@@ -35,12 +33,7 @@ Examples:
 }
 
 func runGenerate(_ context.Context, args []string) error {
-	root, err := project.MustFindRoot()
-	if err != nil {
-		return err
-	}
-
-	m, err := manifest.Load(root)
+	root, m, err := loadProject()
 	if err != nil {
 		return err
 	}

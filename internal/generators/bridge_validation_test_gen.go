@@ -3,7 +3,6 @@ package generators
 import (
 	"bytes"
 	"fmt"
-	"go/format"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -76,14 +75,8 @@ func GenerateBridgeValidationTests(data BridgeTemplateData, bridgeDir string, op
 	if err := tmpl.Execute(&buf, testData); err != nil {
 		return fmt.Errorf("render validation tests: %w", err)
 	}
-	out := buf.Bytes()
-	formatted, err := format.Source(out)
-	if err != nil {
-		_ = writeFile(path, out, opts)
-		return fmt.Errorf("go/format validation tests: %w\nUnformatted output written for debugging.", err)
-	}
-	if err := writeFile(path, formatted, opts); err != nil {
-		return fmt.Errorf("write validation tests: %w", err)
+	if err := renderGoFile("validation tests", buf.Bytes(), path, opts); err != nil {
+		return err
 	}
 	fmt.Printf("      write %s\n", path)
 	return nil

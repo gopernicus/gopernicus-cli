@@ -3,7 +3,6 @@ package generators
 import (
 	"bytes"
 	"fmt"
-	"go/format"
 	"os"
 	"path/filepath"
 	"text/template"
@@ -68,23 +67,18 @@ func GenerateBridgeSecurity(data BridgeTemplateData, resolved *ResolvedFile, bri
 }
 
 func buildBridgeSecurityData(data BridgeTemplateData, resolved *ResolvedFile, modulePath, hostDB string, specMode bool) BridgeSecurityData {
-	storeSuffix := "pgx"
-	if specMode {
-		storeSuffix = specStorePackageSuffix
-	}
-	storePkg := StorePackage(resolved.TableName, storeSuffix)
+	wiring := buildStackWiring(resolved, modulePath, hostDB, specMode)
 
 	sec := BridgeSecurityData{
 		BridgePackage: data.BridgePackage,
 		EntityName:    data.EntityName,
 		FrameworkPath: gopernicusFrameworkPath,
 		SpecMode:      specMode,
-		RepoPkg:       resolved.PackageName,
-		RepoImport:    modulePath + "/core/repositories/" + resolved.DomainName + "/" + resolved.PackageName,
-		StorePkg:      storePkg,
-		StoreImport: modulePath + "/core/repositories/" + resolved.DomainName + "/" +
-			resolved.PackageName + "/" + storePkg,
-		MigrationsDir: "workshop/migrations/" + hostDB,
+		RepoPkg:       wiring.RepoPkg,
+		RepoImport:    wiring.RepoImport,
+		StorePkg:      wiring.StorePkg,
+		StoreImport:   wiring.StoreImport,
+		MigrationsDir: wiring.MigrationsDir,
 	}
 	for _, r := range data.Routes {
 		authenticated := false
@@ -154,10 +148,5 @@ func renderSecurityFile(path, tmplText string, sec BridgeSecurityData, opts Opti
 	if err := tmpl.Execute(&buf, sec); err != nil {
 		return fmt.Errorf("render %s: %w", path, err)
 	}
-	formatted, err := format.Source(buf.Bytes())
-	if err != nil {
-		_ = writeFile(path, buf.Bytes(), opts)
-		return fmt.Errorf("go/format %s: %w\nUnformatted output written for debugging.", path, err)
-	}
-	return writeFile(path, formatted, opts)
+	return renderGoFile(path, buf.Bytes(), path, opts)
 }

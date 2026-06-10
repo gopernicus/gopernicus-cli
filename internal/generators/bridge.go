@@ -3,7 +3,6 @@ package generators
 import (
 	"bytes"
 	"fmt"
-	"go/format"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -97,14 +96,8 @@ func GenerateBridge(resolved *ResolvedFile, domainName, modulePath, projectRoot 
 			return false, fmt.Errorf("render %s for %s: %w", f.name, resolved.TableName, err)
 		}
 
-		formatted, err := format.Source(out)
-		if err != nil {
-			_ = writeFile(path, out, opts)
-			return false, fmt.Errorf("go/format %s: %w\nUnformatted output written for debugging.", f.name, err)
-		}
-
-		if err := writeFile(path, formatted, opts); err != nil {
-			return false, fmt.Errorf("write %s: %w", f.name, err)
+		if err := renderGoFile(f.name, out, path, opts); err != nil {
+			return false, err
 		}
 
 		verb := "write"

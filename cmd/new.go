@@ -6,13 +6,128 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 
 	"github.com/gopernicus/gopernicus-cli/internal/fwsource"
 	"github.com/gopernicus/gopernicus-cli/internal/generators"
 	"github.com/gopernicus/gopernicus-cli/internal/manifest"
-	"github.com/gopernicus/gopernicus-cli/internal/project"
 	"github.com/gopernicus/gopernicus-cli/internal/schema"
 )
+
+// bridgeYMLScaffoldTemplate renders the default bridge.yml for an entity.
+// The "middleware" sub-template writes a standard chain (mw builds its args);
+// "prefilter" writes the list route's prefilter authorization chain.
+const bridgeYMLScaffoldTemplate = `{{define "middleware"}}    middleware:
+{{if .Mutation}}      - max_body_size: 1048576
+{{end}}      - authenticate: any
+      - rate_limit
+{{if and .Perm .Param}}      - authorize:
+          permission: {{.Perm}}
+          param: {{.Param}}
+{{end}}{{end}}{{define "prefilter"}}    middleware:
+      - authenticate: any
+      - rate_limit
+      - authorize:
+          pattern: prefilter
+          permission: read
+{{if .HasTenant}}          subject: "{{.TenantRel}}:{{.TenantColumn}}"
+{{end}}{{end}}# Bridge configuration for {{.EntityPascal}}.
+# Routes and auth schema drive bridge code generation.
+# Remove a route to stop generating its handler — write your own in routes.go.
+
+entity: {{.EntityPascal}}
+repo: {{.Repo}}
+domain: {{.Domain}}
+
+auth_relations:
+{{if .NearestRel}}  - "{{.NearestRel}}({{.NearestRel}})"
+{{end}}  - "owner(user, service_account)"
+
+auth_permissions:
+{{if .NearestRel}}  - "list({{.NearestRel}}->list)"
+  - "create({{.NearestRel}}->manage)"
+  - "read(owner|{{.NearestRel}}->read)"
+  - "update(owner|{{.NearestRel}}->manage)"
+  - "delete(owner|{{.NearestRel}}->manage)"
+  - "manage(owner|{{.NearestRel}}->manage)"
+{{else}}  - "list(owner)"
+  - "create(authenticated)"
+  - "read(owner)"
+  - "update(owner)"
+  - "delete(owner)"
+  - "manage(owner)"
+{{end}}
+routes:
+  - func: List
+    path: {{.BasePath}}
+{{template "prefilter" .}}
+{{if .PKColumn}}  - func: Get
+    path: {{.ResourcePath}}
+{{template "middleware" (mw "read" .PKColumn false)}}
+{{end}}  - func: Create
+    path: {{.BasePath}}
+{{if or .HasTenant .HasParent}}    params_to_input:
+{{if .HasTenant}}      - {{.TenantColumn}}
+{{end}}{{if .HasParent}}      - {{.ParentColumn}}
+{{end}}{{end}}{{template "middleware" (mw "create" .CreateAuthzParam true)}}{{if .PKColumn}}    auth_create:
+      - "{{.EntitySingular}}:{{.PKBrace}}#owner@{=subject}"
+{{if .NearestRel}}      - "{{.EntitySingular}}:{{.PKBrace}}#{{.NearestRel}}@{{.NearestRel}}:{{.NearestColBrace}}"
+{{end}}{{end}}
+{{if .PKColumn}}  - func: Update
+    path: {{.ResourcePath}}
+{{template "middleware" (mw "update" .PKColumn true)}}
+{{end}}{{if and .PKColumn .HasSoftDelete}}  - func: SoftDelete
+    method: PUT
+    path: {{.ResourcePath}}/delete
+{{template "middleware" (mw "delete" .PKColumn false)}}
+  - func: Archive
+    method: PUT
+    path: {{.ResourcePath}}/archive
+{{template "middleware" (mw "update" .PKColumn false)}}
+  - func: Restore
+    method: PUT
+    path: {{.ResourcePath}}/restore
+{{template "middleware" (mw "update" .PKColumn false)}}
+{{end}}{{if .PKColumn}}  - func: Delete
+    path: {{.ResourcePath}}
+{{template "middleware" (mw "delete" .PKColumn false)}}{{end}}`
+
+// bridgeYMLScaffoldTmpl is parsed once; mw bundles the middleware
+// sub-template's arguments (authorize permission/param, mutation flag).
+var bridgeYMLScaffoldTmpl = template.Must(
+	template.New("bridge_yml_scaffold").Funcs(template.FuncMap{
+		"mw": func(perm, param string, mutation bool) map[string]any {
+			return map[string]any{"Perm": perm, "Param": param, "Mutation": mutation}
+		},
+	}).Parse(bridgeYMLScaffoldTemplate),
+)
+
+// bridgeYMLScaffoldData feeds bridgeYMLScaffoldTemplate.
+type bridgeYMLScaffoldData struct {
+	EntityPascal   string
+	EntitySingular string
+	Repo           string // repo key, e.g. "auth/users"
+	Domain         string
+
+	BasePath     string // collection path with full parent chain
+	ResourcePath string // basePath + /{pk}
+
+	PKColumn      string // "" when the table has no primary key
+	PKBrace       string // "{<pk>}", for auth_create tuples
+	HasSoftDelete bool
+
+	HasTenant    bool
+	TenantColumn string
+	TenantRel    string
+
+	HasParent    bool
+	ParentColumn string
+
+	// Nearest parent for auth — parent if it exists, else tenant.
+	NearestRel       string // "" when the entity has neither
+	NearestColBrace  string // "{<nearest parent column>}"
+	CreateAuthzParam string // authorize param for create, "" when no parent
+}
 
 var newCmd = &Command{
 	Name:  "new",
@@ -66,24 +181,7 @@ Examples:
 }
 
 func runNew(_ context.Context, args []string) error {
-	if len(args) == 0 {
-		printCommandHelp(newCmd)
-		return nil
-	}
-	name := args[0]
-	for _, sub := range newCmd.SubCommands {
-		if sub.Name == name {
-			rest := args[1:]
-			for _, a := range rest {
-				if a == "-h" || a == "--help" {
-					printCommandHelp(sub)
-					return nil
-				}
-			}
-			return sub.Run(context.Background(), rest)
-		}
-	}
-	return fmt.Errorf("unknown new subcommand %q\n\nRun 'gopernicus new --help' for usage.", name)
+	return dispatchSub(newCmd, args)
 }
 
 func runNewRepo(_ context.Context, args []string) error {
@@ -93,19 +191,7 @@ func runNewRepo(_ context.Context, args []string) error {
 	}
 	tableOverride := flagValue(args, "--table")
 
-	var entityArg string
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--db" || args[i] == "--table" {
-			i++
-			continue
-		}
-		if strings.HasPrefix(args[i], "--db=") || strings.HasPrefix(args[i], "--table=") {
-			continue
-		}
-		if !strings.HasPrefix(args[i], "-") && entityArg == "" {
-			entityArg = args[i]
-		}
-	}
+	entityArg := firstPositional(args, "--db", "--table")
 
 	if entityArg == "" {
 		return fmt.Errorf("entity path required: domain/entity (e.g. auth/users)\n\nUsage: gopernicus new repo <domain/entity> [--db <name>] [--table <name>]")
@@ -121,11 +207,7 @@ func runNewRepo(_ context.Context, args []string) error {
 		tableName = generators.Pluralize(entityName)
 	}
 
-	root, err := project.MustFindRoot()
-	if err != nil {
-		return err
-	}
-	m, err := manifest.Load(root)
+	root, m, err := loadProject()
 	if err != nil {
 		return err
 	}
@@ -353,141 +435,39 @@ func buildBridgeYMLScaffold(tableName, entityPascal, entitySingular, domainName 
 		createAuthzParam = nearestParent.Column
 	}
 
+	data := bridgeYMLScaffoldData{
+		EntityPascal:     entityPascal,
+		EntitySingular:   entitySingular,
+		Repo:             domainName + "/" + generators.ToPackageName(tableName),
+		Domain:           domainName,
+		BasePath:         basePath,
+		ResourcePath:     resourcePath,
+		PKColumn:         pkColumn,
+		HasSoftDelete:    hasSoftDelete,
+		CreateAuthzParam: createAuthzParam,
+	}
+	if pkColumn != "" {
+		data.PKBrace = "{" + pkColumn + "}"
+	}
+	if anc.Tenant != nil {
+		data.HasTenant = true
+		data.TenantColumn = anc.Tenant.Column
+		data.TenantRel = anc.Tenant.RelName
+	}
+	if anc.Parent != nil {
+		data.HasParent = true
+		data.ParentColumn = anc.Parent.Column
+	}
+	if nearestParent != nil {
+		data.NearestRel = nearestParent.RelName
+		data.NearestColBrace = "{" + nearestParent.Column + "}"
+	}
+
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Bridge configuration for %s.\n", entityPascal)
-	fmt.Fprintf(&b, "# Routes and auth schema drive bridge code generation.\n")
-	fmt.Fprintf(&b, "# Remove a route to stop generating its handler — write your own in routes.go.\n\n")
-	fmt.Fprintf(&b, "entity: %s\n", entityPascal)
-	fmt.Fprintf(&b, "repo: %s/%s\n", domainName, generators.ToPackageName(tableName))
-	fmt.Fprintf(&b, "domain: %s\n\n", domainName)
-
-	// Auth schema — use nearest parent for ReBAC traversal.
-	b.WriteString("auth_relations:\n")
-	if nearestParent != nil {
-		fmt.Fprintf(&b, "  - \"%s(%s)\"\n", nearestParent.RelName, nearestParent.RelName)
+	if err := bridgeYMLScaffoldTmpl.Execute(&b, data); err != nil {
+		// Static template over plain string/bool data — cannot fail at runtime.
+		panic(fmt.Sprintf("rendering bridge.yml scaffold: %v", err))
 	}
-	b.WriteString("  - \"owner(user, service_account)\"\n")
-	b.WriteString("\n")
-
-	b.WriteString("auth_permissions:\n")
-	if nearestParent != nil {
-		fmt.Fprintf(&b, "  - \"list(%s->list)\"\n", nearestParent.RelName)
-		fmt.Fprintf(&b, "  - \"create(%s->manage)\"\n", nearestParent.RelName)
-		fmt.Fprintf(&b, "  - \"read(owner|%s->read)\"\n", nearestParent.RelName)
-		fmt.Fprintf(&b, "  - \"update(owner|%s->manage)\"\n", nearestParent.RelName)
-		fmt.Fprintf(&b, "  - \"delete(owner|%s->manage)\"\n", nearestParent.RelName)
-		fmt.Fprintf(&b, "  - \"manage(owner|%s->manage)\"\n", nearestParent.RelName)
-	} else {
-		b.WriteString("  - \"list(owner)\"\n")
-		b.WriteString("  - \"create(authenticated)\"\n")
-		b.WriteString("  - \"read(owner)\"\n")
-		b.WriteString("  - \"update(owner)\"\n")
-		b.WriteString("  - \"delete(owner)\"\n")
-		b.WriteString("  - \"manage(owner)\"\n")
-	}
-	b.WriteString("\n")
-
-	b.WriteString("routes:\n")
-
-	// Helper to write a standard middleware chain.
-	writeMiddleware := func(authzPerm, authzParam string, isMutation bool) {
-		b.WriteString("    middleware:\n")
-		if isMutation {
-			b.WriteString("      - max_body_size: 1048576\n")
-		}
-		b.WriteString("      - authenticate: any\n")
-		b.WriteString("      - rate_limit\n")
-		if authzPerm != "" && authzParam != "" {
-			b.WriteString("      - authorize:\n")
-			b.WriteString("          permission: " + authzPerm + "\n")
-			b.WriteString("          param: " + authzParam + "\n")
-		}
-	}
-
-	writePrefilterMiddleware := func() {
-		b.WriteString("    middleware:\n")
-		b.WriteString("      - authenticate: any\n")
-		b.WriteString("      - rate_limit\n")
-		b.WriteString("      - authorize:\n")
-		b.WriteString("          pattern: prefilter\n")
-		b.WriteString("          permission: read\n")
-		if anc.Tenant != nil {
-			fmt.Fprintf(&b, "          subject: \"%s:%s\"\n", anc.Tenant.RelName, anc.Tenant.Column)
-		}
-	}
-
-	// List — collection path, prefilter
-	b.WriteString("  - func: List\n")
-	fmt.Fprintf(&b, "    path: %s\n", basePath)
-	writePrefilterMiddleware()
-	b.WriteString("\n")
-
-	// Get — shallow path
-	if pkColumn != "" {
-		b.WriteString("  - func: Get\n")
-		fmt.Fprintf(&b, "    path: %s\n", resourcePath)
-		writeMiddleware("read", pkColumn, false)
-		b.WriteString("\n")
-	}
-
-	// Create — collection path, params_to_input for parent FKs
-	b.WriteString("  - func: Create\n")
-	fmt.Fprintf(&b, "    path: %s\n", basePath)
-	if anc.Tenant != nil || anc.Parent != nil {
-		b.WriteString("    params_to_input:\n")
-		if anc.Tenant != nil {
-			fmt.Fprintf(&b, "      - %s\n", anc.Tenant.Column)
-		}
-		if anc.Parent != nil {
-			fmt.Fprintf(&b, "      - %s\n", anc.Parent.Column)
-		}
-	}
-	writeMiddleware("create", createAuthzParam, true)
-	if pkColumn != "" {
-		b.WriteString("    auth_create:\n")
-		fmt.Fprintf(&b, "      - \"%s:{%s}#owner@{=subject}\"\n", entitySingular, pkColumn)
-		if nearestParent != nil {
-			fmt.Fprintf(&b, "      - \"%s:{%s}#%s@%s:{%s}\"\n", entitySingular, pkColumn, nearestParent.RelName, nearestParent.RelName, nearestParent.Column)
-		}
-	}
-	b.WriteString("\n")
-
-	// Update — shallow path
-	if pkColumn != "" {
-		b.WriteString("  - func: Update\n")
-		fmt.Fprintf(&b, "    path: %s\n", resourcePath)
-		writeMiddleware("update", pkColumn, true)
-		b.WriteString("\n")
-	}
-
-	// SoftDelete / Archive / Restore — shallow path
-	if pkColumn != "" && hasSoftDelete {
-		b.WriteString("  - func: SoftDelete\n")
-		b.WriteString("    method: PUT\n")
-		fmt.Fprintf(&b, "    path: %s/delete\n", resourcePath)
-		writeMiddleware("delete", pkColumn, false)
-		b.WriteString("\n")
-
-		b.WriteString("  - func: Archive\n")
-		b.WriteString("    method: PUT\n")
-		fmt.Fprintf(&b, "    path: %s/archive\n", resourcePath)
-		writeMiddleware("update", pkColumn, false)
-		b.WriteString("\n")
-
-		b.WriteString("  - func: Restore\n")
-		b.WriteString("    method: PUT\n")
-		fmt.Fprintf(&b, "    path: %s/restore\n", resourcePath)
-		writeMiddleware("update", pkColumn, false)
-		b.WriteString("\n")
-	}
-
-	// Delete — shallow path
-	if pkColumn != "" {
-		b.WriteString("  - func: Delete\n")
-		fmt.Fprintf(&b, "    path: %s\n", resourcePath)
-		writeMiddleware("delete", pkColumn, false)
-	}
-
 	return b.String()
 }
 

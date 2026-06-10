@@ -3,7 +3,6 @@ package generators
 import (
 	"bytes"
 	"fmt"
-	"go/format"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,12 +122,7 @@ func renderE2EFile(path, tmplText string, e2e BridgeE2EData, opts Options) error
 	if err := tmpl.Execute(&buf, e2e); err != nil {
 		return fmt.Errorf("render %s: %w", path, err)
 	}
-	formatted, err := format.Source(buf.Bytes())
-	if err != nil {
-		_ = writeFile(path, buf.Bytes(), opts)
-		return fmt.Errorf("go/format %s: %w\nUnformatted output written for debugging.", path, err)
-	}
-	return writeFile(path, formatted, opts)
+	return renderGoFile(path, buf.Bytes(), path, opts)
 }
 
 // FKSeed is one foreign-key create field whose value comes from a parent row
@@ -153,28 +147,25 @@ func buildBridgeE2EData(data BridgeTemplateData, resolved *ResolvedFile, moduleP
 	}
 
 	// Store package + fixtures differ by mode; the test bodies do not.
-	storeSuffix := "pgx"
+	wiring := buildStackWiring(resolved, modulePath, hostDB, specMode)
 	fixturePkg, fixtureDir := "fixtures", "fixtures"
 	if specMode {
-		storeSuffix = specStorePackageSuffix
 		fixturePkg, fixtureDir = "sqlitefixtures", "sqlitefixtures"
 	}
-	storePkg := StorePackage(resolved.TableName, storeSuffix)
 
 	e2e := BridgeE2EData{
 		BridgePackage: data.BridgePackage,
 		EntityName:    data.EntityName,
 		FrameworkPath: gopernicusFrameworkPath,
 		SpecMode:      specMode,
-		RepoPkg:       resolved.PackageName,
-		RepoImport:    modulePath + "/core/repositories/" + resolved.DomainName + "/" + resolved.PackageName,
-		StorePkg:      storePkg,
-		StoreImport: modulePath + "/core/repositories/" + resolved.DomainName + "/" +
-			resolved.PackageName + "/" + storePkg,
+		RepoPkg:       wiring.RepoPkg,
+		RepoImport:    wiring.RepoImport,
+		StorePkg:      wiring.StorePkg,
+		StoreImport:   wiring.StoreImport,
 		FixturePkg:    fixturePkg,
 		FixtureImport: modulePath + "/workshop/testing/" + fixtureDir,
 		FKSeeds:       seeds,
-		MigrationsDir: "workshop/migrations/" + hostDB,
+		MigrationsDir: wiring.MigrationsDir,
 		PKJSON:        resolved.PKColumn,
 		NotFoundID:    "nonexistent-e2e-id",
 	}
