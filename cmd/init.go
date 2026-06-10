@@ -205,24 +205,6 @@ func runInit(_ context.Context, args []string) error {
 		if err := runInitGenerate(target); err != nil {
 			fmt.Printf("  warning: generation skipped (%v)\n", err)
 			fmt.Printf("           run 'gopernicus generate' after 'db reflect' to populate tests/fixtures\n")
-		} else {
-			// Verify the generated code compiles against the resolved
-			// framework version. The most common failure is a version skew:
-			// the generator (this CLI) is newer than the pinned framework
-			// release and emits APIs it doesn't have yet.
-			verify := exec.Command("go", "build", "./...")
-			verify.Dir = target
-			if out, err := verify.CombinedOutput(); err != nil {
-				fmt.Printf("  warning: generated code does not compile against the resolved gopernicus version:\n")
-				for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-					fmt.Printf("    %s\n", line)
-				}
-				if os.Getenv("GOPERNICUS_DEV_SOURCE") == "" {
-					fmt.Printf("  → this CLI may be newer than the pinned framework release. To build against a\n")
-					fmt.Printf("    local checkout, set GOPERNICUS_DEV_SOURCE=/path/to/gopernicus and re-init, or add a\n")
-					fmt.Printf("    replace directive: go mod edit -replace github.com/gopernicus/gopernicus=/path/to/gopernicus\n")
-				}
-			}
 		}
 	}
 
@@ -789,15 +771,15 @@ func applyFeatureSelection(m *manifest.Manifest, features featureSelection) {
 // runInitGenerate runs code generation over a freshly-scaffolded project,
 // using the copied queries.sql + reflected schema. Kept quiet (no verbose
 // per-file output) so it reads as a single init step.
+// runInitGenerate runs the project's pinned generator so even init-time
+// generation matches the framework version the project just pinned — the
+// CLI's own build is never the generator.
 func runInitGenerate(target string) error {
-	m, err := manifest.Load(target)
-	if err != nil {
-		return fmt.Errorf("loading manifest: %w", err)
-	}
-	return generators.Run(generators.Config{
-		ProjectRoot: target,
-		Manifest:    m,
-	})
+	gen := exec.Command("go", "tool", "gopernicus", "generate")
+	gen.Dir = target
+	gen.Stdout = os.Stdout
+	gen.Stderr = os.Stderr
+	return gen.Run()
 }
 
 // copyFeatureAssets copies migrations, core repositories, and bridge
