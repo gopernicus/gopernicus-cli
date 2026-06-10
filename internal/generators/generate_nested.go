@@ -168,7 +168,14 @@ func runNested(cfg Config, schemas map[string]*schema.ReflectedSchema, modulePat
 		} else if generated && opts.Verbose {
 			fmt.Printf("    generated cache layer\n")
 		}
-		if generated, err := GenerateBridge(resolved, b.Domain, modulePath, cfg.ProjectRoot, authEnabled, opts); err != nil {
+		specDB := ""
+		for _, hostDB := range b.DBs {
+			if dbModes[hostDB] == manifest.StoreModeSpec {
+				specDB = hostDB
+				break
+			}
+		}
+		if generated, err := GenerateBridge(resolved, b.Domain, modulePath, cfg.ProjectRoot, authEnabled, specDB, opts); err != nil {
 			return fmt.Errorf("%s/%s: bridge: %w", b.Domain, b.PkgName, err)
 		} else if generated && opts.Verbose {
 			fmt.Printf("    generated bridge layer\n")

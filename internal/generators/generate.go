@@ -402,7 +402,11 @@ func generateFromQueryFile(
 	}
 
 	// Generate bridge layer (from bridge.yml).
-	if generated, err := GenerateBridge(resolved, domainName, modulePath, projectRoot, authEnabled, opts); err != nil {
+	specDB := ""
+	if storeMode == manifest.StoreModeSpec {
+		specDB = qf.Database
+	}
+	if generated, err := GenerateBridge(resolved, domainName, modulePath, projectRoot, authEnabled, specDB, opts); err != nil {
 		return nil, "", fmt.Errorf("bridge: %w", err)
 	} else if generated && opts.Verbose {
 		fmt.Printf("    generated bridge layer\n")
