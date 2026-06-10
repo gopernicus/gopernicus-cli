@@ -120,6 +120,47 @@ func TestE2E{{.EntityName}}List(t *testing.T) {
 	client.Post(t, "{{.CreatePath}}", seededCreate{{.EntityName}}Request(t, db)).RequireStatus(t, 201)
 	client.Get(t, "{{.ListPath}}").RequireStatus(t, 200)
 }
+
+func TestE2E{{.EntityName}}PaginationAdvance(t *testing.T) {
+	client, db := setupE2EServer(t)
+
+	// Three rows, then walk two pages of two — keyset pagination must not
+	// repeat a row across the page boundary (page1 ∩ page2 = ∅).
+	for i := 0; i < 3; i++ {
+		client.Post(t, "{{.CreatePath}}", seededCreate{{.EntityName}}Request(t, db)).RequireStatus(t, 201)
+	}
+
+	page1 := client.Get(t, "{{.ListPath}}?limit=2")
+	page1.RequireStatus(t, 200)
+	cursor := page1.String(t, "pagination.next_cursor")
+	require.NotEmpty(t, cursor, "a full first page must yield a next cursor")
+
+	page2 := client.Get(t, "{{.ListPath}}?limit=2&cursor="+url.QueryEscape(cursor))
+	page2.RequireStatus(t, 200)
+
+	seen := map[string]bool{}
+	for _, row := range page1.Data(t) {
+		if m, ok := row.(map[string]any); ok {
+			seen[toStr(m["{{.PKJSON}}"])] = true
+		}
+	}
+	advanced := false
+	for _, row := range page2.Data(t) {
+		m, ok := row.(map[string]any)
+		if !ok {
+			continue
+		}
+		pk := toStr(m["{{.PKJSON}}"])
+		assert.False(t, seen[pk], "row %s appears on both pages", pk)
+		advanced = true
+	}
+	assert.True(t, advanced, "second page should contain the remaining row")
+}
+
+func toStr(v any) string {
+	s, _ := v.(string)
+	return s
+}
 {{end}}{{if .HasDelete}}
 func TestE2E{{.EntityName}}Delete(t *testing.T) {
 	client, db := setupE2EServer(t)
