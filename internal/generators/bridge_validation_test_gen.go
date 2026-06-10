@@ -98,6 +98,11 @@ func buildBridgeValidationTestData(data BridgeTemplateData) BridgeValidationTest
 	if len(data.CreateQueries) > 0 {
 		out.HasCreate = true
 		for _, f := range data.CreateQueries[0].Fields {
+			// The primary key is server-generated — never pin it in the valid
+			// baseline, or repeated creates (e.g. the pagination e2e) collide.
+			if f.DBName == data.PKColumn {
+				continue
+			}
 			if assign, ok := validCreateAssign(f); ok {
 				out.CreateValidAssigns = append(out.CreateValidAssigns, assign)
 			}

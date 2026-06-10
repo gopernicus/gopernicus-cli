@@ -168,14 +168,15 @@ func runNested(cfg Config, schemas map[string]*schema.ReflectedSchema, modulePat
 		} else if generated && opts.Verbose {
 			fmt.Printf("    generated cache layer\n")
 		}
-		specDB := ""
-		for _, hostDB := range b.DBs {
-			if dbModes[hostDB] == manifest.StoreModeSpec {
-				specDB = hostDB
-				break
-			}
+		// e2e boots against the canonical hosting database (DBs[0]) in its
+		// store mode.
+		hostDB := ""
+		hostSpecMode := false
+		if len(b.DBs) > 0 {
+			hostDB = b.DBs[0]
+			hostSpecMode = dbModes[hostDB] == manifest.StoreModeSpec
 		}
-		if generated, err := GenerateBridge(resolved, b.Domain, modulePath, cfg.ProjectRoot, authEnabled, specDB, opts); err != nil {
+		if generated, err := GenerateBridge(resolved, b.Domain, modulePath, cfg.ProjectRoot, authEnabled, hostDB, hostSpecMode, opts); err != nil {
 			return fmt.Errorf("%s/%s: bridge: %w", b.Domain, b.PkgName, err)
 		} else if generated && opts.Verbose {
 			fmt.Printf("    generated bridge layer\n")

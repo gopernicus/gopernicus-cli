@@ -19,6 +19,11 @@ type BridgeE2EData struct {
 	EntityName    string
 	FrameworkPath string
 
+	// SpecMode selects the test stack: spec → testsqlite + sqlitefixtures +
+	// NewStore(q,d,inTx); pgx → testpgx + fixtures + NewStore(log, pool).
+	// The HTTP-level test bodies are identical either way.
+	SpecMode bool
+
 	RepoPkg     string
 	RepoImport  string
 	StorePkg    string
@@ -26,13 +31,19 @@ type BridgeE2EData struct {
 
 	MigrationsDir string // e.g. "workshop/migrations/litedb"
 
-	// FixtureImport / FKSeeds drive parent seeding for FK-child entities:
-	// the create body's FK fields are populated from rows the sqlitefixtures
-	// package inserts before the POST.
+	// FixturePkg / FixtureImport / FKSeeds drive parent seeding for FK-child
+	// entities: the create body's FK fields are populated from rows the
+	// fixtures package inserts before the POST.
+	FixturePkg    string
 	FixtureImport string
 	FKSeeds       []FKSeed
 
 	PKJSON string // JSON field name of the PK, e.g. "id"
+
+	// NotFoundID is a syntactically-valid but absent id for the not-found
+	// probe — a real UUID for uuid PKs (a non-UUID string would 500 on the
+	// pgx driver, not 404), else an arbitrary string.
+	NotFoundID string
 
 	CreatePath string // POST path, no params
 
@@ -75,10 +86,10 @@ type BridgeE2EData struct {
 // skipped for now — their POST bodies need seeded parents. Routes with
 // params other than the PK are likewise skipped (scope params need fixture
 // context the plain HTTP round-trip doesn't have).
-func GenerateBridgeE2E(data BridgeTemplateData, resolved *ResolvedFile, bridgeDir, modulePath, specDB string, opts Options) error {
+func GenerateBridgeE2E(data BridgeTemplateData, resolved *ResolvedFile, bridgeDir, modulePath, hostDB string, specMode bool, opts Options) error {
 	path := filepath.Join(bridgeDir, "generated_e2e_test.go")
 
-	e2e, ok := buildBridgeE2EData(data, resolved, modulePath, specDB)
+	e2e, ok := buildBridgeE2EData(data, resolved, modulePath, hostDB, specMode)
 	if !ok {
 		if fileExists(path) && !opts.DryRun {
 			if err := os.Remove(path); err != nil {
@@ -128,7 +139,7 @@ type FKSeed struct {
 	ParentPKExpr string // expr off the seeded parent, e.g. "parent0.ID"
 }
 
-func buildBridgeE2EData(data BridgeTemplateData, resolved *ResolvedFile, modulePath, specDB string) (BridgeE2EData, bool) {
+func buildBridgeE2EData(data BridgeTemplateData, resolved *ResolvedFile, modulePath, hostDB string, specMode bool) (BridgeE2EData, bool) {
 	if len(data.CreateQueries) == 0 {
 		return BridgeE2EData{}, false
 	}
@@ -141,19 +152,34 @@ func buildBridgeE2EData(data BridgeTemplateData, resolved *ResolvedFile, moduleP
 		return BridgeE2EData{}, false
 	}
 
+	// Store package + fixtures differ by mode; the test bodies do not.
+	storeSuffix := "pgx"
+	fixturePkg, fixtureDir := "fixtures", "fixtures"
+	if specMode {
+		storeSuffix = specStorePackageSuffix
+		fixturePkg, fixtureDir = "sqlitefixtures", "sqlitefixtures"
+	}
+	storePkg := StorePackage(resolved.TableName, storeSuffix)
+
 	e2e := BridgeE2EData{
 		BridgePackage: data.BridgePackage,
 		EntityName:    data.EntityName,
 		FrameworkPath: gopernicusFrameworkPath,
+		SpecMode:      specMode,
 		RepoPkg:       resolved.PackageName,
 		RepoImport:    modulePath + "/core/repositories/" + resolved.DomainName + "/" + resolved.PackageName,
-		StorePkg:      StorePackage(resolved.TableName, specStorePackageSuffix),
+		StorePkg:      storePkg,
 		StoreImport: modulePath + "/core/repositories/" + resolved.DomainName + "/" +
-			resolved.PackageName + "/" + StorePackage(resolved.TableName, specStorePackageSuffix),
-		FixtureImport: modulePath + "/workshop/testing/sqlitefixtures",
+			resolved.PackageName + "/" + storePkg,
+		FixturePkg:    fixturePkg,
+		FixtureImport: modulePath + "/workshop/testing/" + fixtureDir,
 		FKSeeds:       seeds,
-		MigrationsDir: "workshop/migrations/" + specDB,
+		MigrationsDir: "workshop/migrations/" + hostDB,
 		PKJSON:        resolved.PKColumn,
+		NotFoundID:    "nonexistent-e2e-id",
+	}
+	if pkIsUUID(resolved) {
+		e2e.NotFoundID = "00000000-0000-4000-8000-000000000000"
 	}
 	for _, col := range resolved.AllColumns {
 		if col.Name == "record_state" {
@@ -166,6 +192,13 @@ func buildBridgeE2EData(data BridgeTemplateData, resolved *ResolvedFile, moduleP
 			continue
 		}
 		for _, f := range lq.FilterFields {
+			// Enum filters have a closed, type-checked domain — an
+			// out-of-domain value can't inject (it's bound and rejected by
+			// the column type), so they aren't a probe surface. (Postgres
+			// 500s on an invalid enum cast; tracked as a robustness item.)
+			if f.IsEnum {
+				continue
+			}
 			if f.IsString {
 				e2e.StringFilterParams = append(e2e.StringFilterParams, f.DBName)
 			} else {

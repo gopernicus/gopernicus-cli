@@ -46,7 +46,7 @@ routes:
       - authenticate: user
 `)
 
-	_, err := GenerateBridge(gateResolved(), "things", "github.com/x/app", root, false, "", Options{})
+	_, err := GenerateBridge(gateResolved(), "things", "github.com/x/app", root, false, "", false, Options{})
 	if err == nil {
 		t.Fatal("expected an error for authenticate: on a project without the authentication feature")
 	}
@@ -67,7 +67,7 @@ routes:
       - authorize: {type: widget, permission: read, param: id}
 `)
 
-	_, err := GenerateBridge(gateResolved(), "things", "github.com/x/app", root, false, "", Options{})
+	_, err := GenerateBridge(gateResolved(), "things", "github.com/x/app", root, false, "", false, Options{})
 	if err == nil {
 		t.Fatal("expected an error for authorize: on a project without the authentication feature")
 	}

@@ -37,7 +37,11 @@ import (
 	"{{.FrameworkPath}}/sdk/logger"
 	"{{.FrameworkPath}}/sdk/web"
 	"{{.FrameworkPath}}/workshop/testing/testhttp"
+{{- if .SpecMode}}
 	"{{.FrameworkPath}}/workshop/testing/testsqlite"
+{{- else}}
+	"{{.FrameworkPath}}/workshop/testing/testpgx"
+{{- end}}
 {{- if .FKSeeds}}
 	"{{.FixtureImport}}"
 {{- end}}
@@ -46,11 +50,14 @@ import (
 // Ensure imports are used.
 var _ = assert.Equal
 
-// setupE2EServer boots the full HTTP stack for {{.EntityName}} against a
-// fresh sqlite database: store → repository → bridge → web handler. It
-// returns the test DB too so FK parents can be seeded into the same store
-// the server reads. migrateE2EDB is defined in e2e_test.go (bootstrap file).
-func setupE2EServer(t *testing.T) (*testhttp.Client, *testsqlite.TestSQLite) {
+// e2eDB is the test database handle the stack boots against.
+type e2eDB = {{if .SpecMode}}*testsqlite.TestSQLite{{else}}*testpgx.TestPGX{{end}}
+
+// setupE2EServer boots the full HTTP stack for {{.EntityName}} against a fresh
+// database: store → repository → bridge → web handler. It returns the test DB
+// too so FK parents can be seeded into the same store the server reads.
+// migrateE2EDB is defined in e2e_test.go (bootstrap file).
+func setupE2EServer(t *testing.T) (*testhttp.Client, e2eDB) {
 	t.Helper()
 
 	if testing.Short() {
@@ -58,10 +65,16 @@ func setupE2EServer(t *testing.T) (*testhttp.Client, *testsqlite.TestSQLite) {
 	}
 
 	ctx := context.Background()
+{{- if .SpecMode}}
 	db := testsqlite.SetupTestSQLite(t, ctx, testsqlite.WithMigrations(migrateE2EDB))
 
 	store, err := {{.StorePkg}}.NewStore(db.Querier(), db.Dialect(), {{.StorePkg}}.TxRunner(db.TxRunner()))
 	require.NoError(t, err)
+{{- else}}
+	db := testpgx.SetupTestPGX(t, ctx, testpgx.WithMigrations(migrateE2EDB))
+
+	store := {{.StorePkg}}.NewStore(logger.NewNoop(), db.Pool)
+{{- end}}
 	repo := {{.RepoPkg}}.NewRepository({{.RepoPkg}}.NewCacheStore(store, nil))
 
 	limiter := ratelimiter.New(memorylimiter.New(), ratelimiter.NewDefaultResolver())
@@ -78,13 +91,13 @@ func setupE2EServer(t *testing.T) (*testhttp.Client, *testsqlite.TestSQLite) {
 
 // seededCreate{{.EntityName}}Request builds a valid create request, populating
 // foreign-key fields from parent rows seeded into db.
-func seededCreate{{.EntityName}}Request(t *testing.T, db *testsqlite.TestSQLite) Create{{.EntityName}}Request {
+func seededCreate{{.EntityName}}Request(t *testing.T, db e2eDB) Create{{.EntityName}}Request {
 	t.Helper()
 {{- if .FKSeeds}}
 	ctx := context.Background()
 	req := validCreate{{.EntityName}}Request()
 {{- range $i, $s := .FKSeeds}}
-	parent{{$i}} := sqlitefixtures.CreateTest{{$s.ParentEntity}}WithDefaults(t, ctx, db)
+	parent{{$i}} := {{$.FixturePkg}}.CreateTest{{$s.ParentEntity}}WithDefaults(t, ctx, db)
 	req.{{$s.RequestField}} = {{$s.ParentPKExpr}}
 {{- end}}
 	return req
@@ -108,7 +121,7 @@ func TestE2E{{.EntityName}}CreateAndGet(t *testing.T) {
 	assert.Equal(t, id, got.String(t, "record.{{.PKJSON}}"))
 
 	t.Run("not found", func(t *testing.T) {
-		id := "nonexistent-e2e-id"
+		id := "{{.NotFoundID}}"
 		client.Get(t, {{.GetPathExpr}}).RequireStatus(t, 404)
 	})
 {{- end}}
@@ -290,13 +303,23 @@ import (
 	"path/filepath"
 	"runtime"
 
+{{- if .SpecMode}}
 	"{{.FrameworkPath}}/infrastructure/database/sqlite/moderncdb"
+{{- else}}
+	"{{.FrameworkPath}}/infrastructure/database/postgres/pgxdb"
+{{- end}}
 )
 
 // migrateE2EDB applies this project's migrations to the e2e test database.
+{{- if .SpecMode}}
 func migrateE2EDB(ctx context.Context, db *moderncdb.DB) error {
 	return moderncdb.RunMigrations(ctx, db, os.DirFS(e2eProjectRoot()), "{{.MigrationsDir}}")
 }
+{{- else}}
+func migrateE2EDB(ctx context.Context, pool *pgxdb.Pool) error {
+	return pgxdb.RunMigrations(ctx, pool, os.DirFS(e2eProjectRoot()), "{{.MigrationsDir}}")
+}
+{{- end}}
 
 // e2eProjectRoot walks up from this source file to the directory containing
 // go.mod, so the migrations path resolves at any test working directory.

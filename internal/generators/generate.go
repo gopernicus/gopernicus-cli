@@ -401,12 +401,10 @@ func generateFromQueryFile(
 		fmt.Printf("    generated cache layer\n")
 	}
 
-	// Generate bridge layer (from bridge.yml).
-	specDB := ""
-	if storeMode == manifest.StoreModeSpec {
-		specDB = qf.Database
-	}
-	if generated, err := GenerateBridge(resolved, domainName, modulePath, projectRoot, authEnabled, specDB, opts); err != nil {
+	// Generate bridge layer (from bridge.yml). e2e boots against this
+	// entity's hosting database in its store mode.
+	specMode := storeMode == manifest.StoreModeSpec
+	if generated, err := GenerateBridge(resolved, domainName, modulePath, projectRoot, authEnabled, qf.Database, specMode, opts); err != nil {
 		return nil, "", fmt.Errorf("bridge: %w", err)
 	} else if generated && opts.Verbose {
 		fmt.Printf("    generated bridge layer\n")

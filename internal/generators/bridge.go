@@ -14,9 +14,9 @@ import (
 // Bridge struct has all fields directly, handlers on *Bridge, no GeneratedX.
 // Routes are wired via addGeneratedRoutes() in generated.go, called from routes.go.
 // Returns (false, nil) if no bridge.yml exists.
-// specDB names the spec-mode database hosting the entity ("" = none); it
-// drives e2e generation, which boots a container-free sqlite stack.
-func GenerateBridge(resolved *ResolvedFile, domainName, modulePath, projectRoot string, authEnabled bool, specDB string, opts Options) (bool, error) {
+// hostDB names the database whose store the e2e stack boots against, and
+// hostSpecMode selects spec (testsqlite) vs pgx (testpgx) for that stack.
+func GenerateBridge(resolved *ResolvedFile, domainName, modulePath, projectRoot string, authEnabled bool, hostDB string, hostSpecMode bool, opts Options) (bool, error) {
 	bridgeDir := BridgeDir(domainName, resolved.TableName, projectRoot)
 	ymlPath := filepath.Join(bridgeDir, "bridge.yml")
 
@@ -122,8 +122,8 @@ func GenerateBridge(resolved *ResolvedFile, domainName, modulePath, projectRoot 
 		return false, fmt.Errorf("bridge security tests: %w", err)
 	}
 
-	if specDB != "" {
-		if err := GenerateBridgeE2E(data, resolved, bridgeDir, modulePath, specDB, opts); err != nil {
+	if hostDB != "" {
+		if err := GenerateBridgeE2E(data, resolved, bridgeDir, modulePath, hostDB, hostSpecMode, opts); err != nil {
 			return false, fmt.Errorf("bridge e2e tests: %w", err)
 		}
 	}
