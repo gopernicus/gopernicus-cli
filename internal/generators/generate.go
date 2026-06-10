@@ -78,7 +78,7 @@ func runLegacy(cfg Config, schemas map[string]*schema.ReflectedSchema, modulePat
 	// Collect entities per domain for composite generation.
 	domainEntities := make(map[string][]CompositeEntity)
 	domainBridgeEntities := make(map[string][]BridgeCompositeEntity) // entities with a bridge.yml
-	var allFixtureEntities []FixtureEntity                           // entities for fixture generation (single package, cross-domain)
+	var pgxFixtureEntities, specFixtureEntities []FixtureEntity      // entities for fixture generation (cross-domain, per store mode)
 	domainDirs := make(map[string]string)                            // domain name → absolute dir path
 	domainTableNames := make(map[string]map[string]string)           // domain → (pkgName → tableName)
 	domainResolvedFiles := make(map[string][]*ResolvedFile)          // domain → resolved files (for auth schema)
@@ -126,8 +126,12 @@ func runLegacy(cfg Config, schemas map[string]*schema.ReflectedSchema, modulePat
 				domainBridgeEntities[domain] = append(domainBridgeEntities[domain], BuildBridgeCompositeEntity(resolved))
 			}
 
-			// Track entities for fixture generation.
-			allFixtureEntities = append(allFixtureEntities, BuildFixtureEntity(resolved, modulePath))
+			// Track entities for fixture generation, per store mode.
+			if storeMode == manifest.StoreModeSpec {
+				specFixtureEntities = append(specFixtureEntities, BuildFixtureEntity(resolved, modulePath))
+			} else {
+				pgxFixtureEntities = append(pgxFixtureEntities, BuildFixtureEntity(resolved, modulePath))
+			}
 		}
 	}
 
@@ -177,17 +181,25 @@ func runLegacy(cfg Config, schemas map[string]*schema.ReflectedSchema, modulePat
 			if inScope[qfPath] {
 				continue
 			}
-			resolved, err := resolveForFixture(qfPath, schemas, cfg.ProjectRoot)
+			resolved, dbName, err := resolveForFixture(qfPath, schemas, cfg.ProjectRoot)
 			if err != nil {
 				return fmt.Errorf("%s: resolve for fixture: %w", qfPath, err)
 			}
 			if resolved == nil {
 				continue
 			}
-			allFixtureEntities = append(allFixtureEntities, BuildFixtureEntity(resolved, modulePath))
+			mode, err := cfg.Manifest.DatabaseOrDefault(dbName).StoreMode()
+			if err != nil {
+				return fmt.Errorf("%s: store mode: %w", qfPath, err)
+			}
+			if mode == manifest.StoreModeSpec {
+				specFixtureEntities = append(specFixtureEntities, BuildFixtureEntity(resolved, modulePath))
+			} else {
+				pgxFixtureEntities = append(pgxFixtureEntities, BuildFixtureEntity(resolved, modulePath))
+			}
 		}
 	}
-	return emitFixtures(allFixtureEntities, cfg.ProjectRoot, modulePath, opts)
+	return emitFixtures(pgxFixtureEntities, specFixtureEntities, cfg.ProjectRoot, modulePath, opts)
 }
 
 // injectBridgeAuthSchema overrides the resolved file's auth relations and
@@ -278,19 +290,35 @@ func emitBridgeComposites(
 	return nil
 }
 
-// emitFixtures writes the cross-domain test fixtures package.
-func emitFixtures(entities []FixtureEntity, projectRoot, modulePath string, opts Options) error {
-	if len(entities) == 0 {
-		return nil
+// emitFixtures writes the cross-domain test fixture packages, one per store
+// mode: fixtures/ (pgx, testpgx-backed) and sqlitefixtures/ (spec,
+// testsqlite-backed). Multi-homed entities appear in both.
+func emitFixtures(pgxEntities, specEntities []FixtureEntity, projectRoot, modulePath string, opts Options) error {
+	if len(pgxEntities) > 0 {
+		fixtureDir := filepath.Join(projectRoot, "workshop", "testing", "fixtures")
+		data := FixtureTemplateData{
+			ModulePath:    modulePath,
+			FrameworkPath: gopernicusFrameworkPath,
+			Entities:      pgxEntities,
+		}
+		fmt.Printf("\n  fixtures/ (test fixtures)\n")
+		if err := GenerateFixtures(data, fixtureDir, opts); err != nil {
+			return err
+		}
 	}
-	fixtureDir := filepath.Join(projectRoot, "workshop", "testing", "fixtures")
-	data := FixtureTemplateData{
-		ModulePath:    modulePath,
-		FrameworkPath: gopernicusFrameworkPath,
-		Entities:      entities,
+	if len(specEntities) > 0 {
+		fixtureDir := filepath.Join(projectRoot, "workshop", "testing", "sqlitefixtures")
+		data := FixtureTemplateData{
+			ModulePath:    modulePath,
+			FrameworkPath: gopernicusFrameworkPath,
+			Entities:      specEntities,
+		}
+		fmt.Printf("\n  sqlitefixtures/ (spec test fixtures)\n")
+		if err := GenerateSpecFixtures(data, fixtureDir, opts); err != nil {
+			return err
+		}
 	}
-	fmt.Printf("\n  fixtures/ (test fixtures)\n")
-	return GenerateFixtures(data, fixtureDir, opts)
+	return nil
 }
 
 func generateFromQueryFile(
@@ -428,10 +456,10 @@ func resolveForFixture(
 	qfPath string,
 	schemas map[string]*schema.ReflectedSchema,
 	projectRoot string,
-) (*ResolvedFile, error) {
+) (*ResolvedFile, string, error) {
 	qf, err := Parse(qfPath)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	repoDir := filepath.Dir(qfPath)
@@ -439,14 +467,14 @@ func resolveForFixture(
 
 	tableName, schemaName, err := inferTableName(dirName, schemas, qf.Database)
 	if err != nil {
-		return nil, nil
+		return nil, "", nil
 	}
 	qf.Table = tableName
 
 	key := qf.Database + ":" + schemaName
 	s, ok := schemas[key]
 	if !ok {
-		return nil, fmt.Errorf(
+		return nil, "", fmt.Errorf(
 			"reflected schema for database %q schema %q not found\n\n"+
 				"Run 'gopernicus db reflect' to generate it.",
 			qf.Database, schemaName,
@@ -454,7 +482,8 @@ func resolveForFixture(
 	}
 
 	domainName := domainFromPath(qfPath, projectRoot)
-	return Resolve(qf, s, domainName)
+	resolved, err := Resolve(qf, s, domainName)
+	return resolved, qf.Database, err
 }
 
 func loadSchemas(root string, m *manifest.Manifest) (map[string]*schema.ReflectedSchema, error) {

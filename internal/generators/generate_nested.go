@@ -138,7 +138,7 @@ func runNested(cfg Config, schemas map[string]*schema.ReflectedSchema, modulePat
 	domainDBs := make(map[string][]string) // domain → hosting dbs, canonical order
 	domainBridgeEntities := make(map[string][]BridgeCompositeEntity)
 	domainResolvedFiles := make(map[string][]*ResolvedFile)
-	var allFixtureEntities []FixtureEntity
+	var pgxFixtureEntities, specFixtureEntities []FixtureEntity
 
 	for _, b := range bindings {
 		if cfg.Domain != "" && b.Domain != cfg.Domain {
@@ -233,7 +233,14 @@ func runNested(cfg Config, schemas map[string]*schema.ReflectedSchema, modulePat
 		if fileExists(bridgeYMLPath(b.Domain, resolved.TableName, cfg.ProjectRoot)) {
 			domainBridgeEntities[b.Domain] = append(domainBridgeEntities[b.Domain], BuildBridgeCompositeEntity(resolved))
 		}
-		allFixtureEntities = append(allFixtureEntities, BuildFixtureEntity(resolved, modulePath))
+		fixtureEntity := BuildFixtureEntity(resolved, modulePath)
+		for _, mode := range hostedStoreModes(b.DBs, dbModes) {
+			if mode == manifest.StoreModeSpec {
+				specFixtureEntities = append(specFixtureEntities, fixtureEntity)
+			} else {
+				pgxFixtureEntities = append(pgxFixtureEntities, fixtureEntity)
+			}
+		}
 	}
 
 	// Domain composites, per (database, domain).
@@ -284,10 +291,33 @@ func runNested(cfg Config, schemas map[string]*schema.ReflectedSchema, modulePat
 			if err != nil || resolved == nil {
 				continue // out-of-scope entities are best-effort for fixtures
 			}
-			allFixtureEntities = append(allFixtureEntities, BuildFixtureEntity(resolved, modulePath))
+			fixtureEntity := BuildFixtureEntity(resolved, modulePath)
+			for _, mode := range hostedStoreModes(b.DBs, dbModes) {
+				if mode == manifest.StoreModeSpec {
+					specFixtureEntities = append(specFixtureEntities, fixtureEntity)
+				} else {
+					pgxFixtureEntities = append(pgxFixtureEntities, fixtureEntity)
+				}
+			}
 		}
 	}
-	return emitFixtures(allFixtureEntities, cfg.ProjectRoot, modulePath, opts)
+	return emitFixtures(pgxFixtureEntities, specFixtureEntities, cfg.ProjectRoot, modulePath, opts)
+}
+
+// hostedStoreModes returns the distinct store modes of the databases hosting
+// an entity, in pgx-then-spec order — a multi-homed entity may need fixtures
+// for both packages.
+func hostedStoreModes(dbs []string, dbModes map[string]manifest.StoreMode) []manifest.StoreMode {
+	var modes []manifest.StoreMode
+	seen := make(map[manifest.StoreMode]bool, 2)
+	for _, db := range dbs {
+		mode := dbModes[db]
+		if !seen[mode] {
+			seen[mode] = true
+			modes = append(modes, mode)
+		}
+	}
+	return modes
 }
 
 // resolveNestedBinding parses and resolves a binding's queries.sql against

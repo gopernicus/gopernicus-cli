@@ -96,6 +96,7 @@ type FixtureTemplateData struct {
 	FrameworkPath string // gopernicus framework module path (for sdk, infra imports)
 	Entities      []FixtureEntity
 	Imports       []string // deduplicated extra imports
+	NeedsTime     bool     // "time" is among Imports — gates the usage guard
 }
 
 // BuildFixtureEntity creates a FixtureEntity from a ResolvedFile.
@@ -447,6 +448,16 @@ func computeTransitiveExternalParams(entities []FixtureEntity) {
 
 // GenerateFixtures produces the test fixtures file for all entities in a domain.
 func GenerateFixtures(data FixtureTemplateData, fixtureDir string, opts Options) error {
+	return generateFixturesWith(data, fixtureDir, fixtureGeneratedTemplate, fixtureBootstrapTemplate, opts)
+}
+
+// GenerateSpecFixtures produces the sqlite-flavored fixtures package for
+// spec-store entities: testsqlite handle, ? placeholders, datetime('now').
+func GenerateSpecFixtures(data FixtureTemplateData, fixtureDir string, opts Options) error {
+	return generateFixturesWith(data, fixtureDir, specFixtureGeneratedTemplate, specFixtureBootstrapTemplate, opts)
+}
+
+func generateFixturesWith(data FixtureTemplateData, fixtureDir, generatedTmpl, bootstrapTmpl string, opts Options) error {
 	if len(data.Entities) == 0 {
 		return nil
 	}
@@ -475,6 +486,12 @@ func GenerateFixtures(data FixtureTemplateData, fixtureDir string, opts Options)
 
 	// Collect unique imports.
 	data.Imports = collectFixtureImports(data.Entities)
+	for _, imp := range data.Imports {
+		if imp == "time" {
+			data.NeedsTime = true
+			break
+		}
+	}
 
 	type genFile struct {
 		name      string
@@ -483,8 +500,8 @@ func GenerateFixtures(data FixtureTemplateData, fixtureDir string, opts Options)
 	}
 
 	genFiles := []genFile{
-		{"generated.go", fixtureGeneratedTemplate, false},
-		{"fixtures.go", fixtureBootstrapTemplate, true},
+		{"generated.go", generatedTmpl, false},
+		{"fixtures.go", bootstrapTmpl, true},
 	}
 
 	for _, f := range genFiles {
@@ -524,6 +541,7 @@ func renderFixtureTemplate(tmplStr string, data FixtureTemplateData) ([]byte, er
 		"singularize":    Singularize,
 		"join":           strings.Join,
 		"positionalArgs": positionalArgs,
+		"questionArgs":   questionArgs,
 		"add":            func(a, b int) int { return a + b },
 		"insertCols":     insertCols,
 		"selectCols":     selectCols,
@@ -575,6 +593,15 @@ func positionalArgs(n int) string {
 	args := make([]string, n)
 	for i := range args {
 		args[i] = fmt.Sprintf("$%d", i+1)
+	}
+	return strings.Join(args, ", ")
+}
+
+// questionArgs renders sqlite's positional placeholders: "?, ?, ?".
+func questionArgs(n int) string {
+	args := make([]string, n)
+	for i := range args {
+		args[i] = "?"
 	}
 	return strings.Join(args, ", ")
 }
