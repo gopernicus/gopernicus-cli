@@ -26,6 +26,12 @@ type BridgeE2EData struct {
 
 	MigrationsDir string // e.g. "workshop/migrations/litedb"
 
+	// FixtureImport / FKSeeds drive parent seeding for FK-child entities:
+	// the create body's FK fields are populated from rows the sqlitefixtures
+	// package inserts before the POST.
+	FixtureImport string
+	FKSeeds       []FKSeed
+
 	PKJSON string // JSON field name of the PK, e.g. "id"
 
 	CreatePath string // POST path, no params
@@ -106,19 +112,25 @@ func renderE2EFile(path, tmplText string, e2e BridgeE2EData, opts Options) error
 	return writeFile(path, formatted, opts)
 }
 
+// FKSeed is one foreign-key create field whose value comes from a parent row
+// seeded by the fixtures package before the POST.
+type FKSeed struct {
+	RequestField string // create-request Go field, e.g. "AccountID"
+	ParentEntity string // parent entity name, e.g. "Account"
+	ParentPKExpr string // expr off the seeded parent, e.g. "parent0.ID"
+}
+
 func buildBridgeE2EData(data BridgeTemplateData, resolved *ResolvedFile, modulePath, specDB string) (BridgeE2EData, bool) {
-	// A required FK in the create model means the plain POST body cannot
-	// satisfy referential integrity without seeded parents.
 	if len(data.CreateQueries) == 0 {
 		return BridgeE2EData{}, false
 	}
-	for i := range resolved.Queries {
-		rq := resolved.Queries[i]
-		for _, f := range rq.InsertFields {
-			if f.IsForeignKey && !f.IsNullable && f.DBName != resolved.PKColumn {
-				return BridgeE2EData{}, false
-			}
-		}
+
+	// Required FK create fields are populated from seeded parents. Each FK
+	// column must map to a field in the create request (one that wasn't
+	// stripped as a URL path param) and a parent table we can seed.
+	seeds, ok := buildFKSeeds(data, resolved)
+	if !ok {
+		return BridgeE2EData{}, false
 	}
 
 	e2e := BridgeE2EData{
@@ -130,6 +142,8 @@ func buildBridgeE2EData(data BridgeTemplateData, resolved *ResolvedFile, moduleP
 		StorePkg:      StorePackage(resolved.TableName, specStorePackageSuffix),
 		StoreImport: modulePath + "/core/repositories/" + resolved.DomainName + "/" +
 			resolved.PackageName + "/" + StorePackage(resolved.TableName, specStorePackageSuffix),
+		FixtureImport: modulePath + "/workshop/testing/sqlitefixtures",
+		FKSeeds:       seeds,
 		MigrationsDir: "workshop/migrations/" + specDB,
 		PKJSON:        resolved.PKColumn,
 	}
@@ -192,6 +206,60 @@ func buildBridgeE2EData(data BridgeTemplateData, resolved *ResolvedFile, moduleP
 		return BridgeE2EData{}, false
 	}
 	return e2e, true
+}
+
+// buildFKSeeds maps each required (NOT NULL) foreign-key create field to a
+// parent fixture and the create-request field it fills. Returns ok=false when
+// an FK can't be seeded from the request body (e.g. it was stripped as a URL
+// path param, or its create field isn't in the request), so the caller falls
+// back to skipping e2e for that entity. Self-referential FKs are nullable by
+// design and need no seed.
+func buildFKSeeds(data BridgeTemplateData, resolved *ResolvedFile) ([]FKSeed, bool) {
+	if resolved.Table == nil {
+		return nil, true
+	}
+
+	// Request fields present in the (path-param-stripped) create model.
+	requestFields := map[string]string{} // dbName -> GoName
+	for _, f := range data.CreateQueries[0].Fields {
+		requestFields[f.DBName] = f.GoName
+	}
+
+	// Which create columns are NOT NULL (required for a successful insert).
+	required := map[string]bool{}
+	for _, rq := range resolved.Queries {
+		for _, f := range rq.InsertFields {
+			if !f.IsNullable {
+				required[f.DBName] = true
+			}
+		}
+	}
+
+	var seeds []FKSeed
+	idx := 0
+	for _, fk := range resolved.Table.ForeignKeys {
+		if len(fk.Columns) != 1 || len(fk.RefColumns) != 1 {
+			return nil, false // composite FK — not seedable by this simple path
+		}
+		col := fk.Columns[0]
+		if !required[col] {
+			continue // nullable FK — the insert succeeds without it
+		}
+		if fk.RefTable == resolved.TableName {
+			return nil, false // self-ref required FK can't be satisfied
+		}
+		goName, ok := requestFields[col]
+		if !ok {
+			return nil, false // FK not settable from the request body
+		}
+		seeds = append(seeds, FKSeed{
+			RequestField: goName,
+			ParentEntity: ToPascalCase(Singularize(fk.RefTable)),
+			ParentPKExpr: fmt.Sprintf("parent%d.%s", idx, ToPascalCase(fk.RefColumns[0])),
+		})
+		idx++
+	}
+	return seeds, true
 }
 
 // pkOnlyPathExpr converts a route path whose only parameter is the PK into a

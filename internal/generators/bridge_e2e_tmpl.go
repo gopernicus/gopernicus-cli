@@ -38,15 +38,19 @@ import (
 	"{{.FrameworkPath}}/sdk/web"
 	"{{.FrameworkPath}}/workshop/testing/testhttp"
 	"{{.FrameworkPath}}/workshop/testing/testsqlite"
+{{- if .FKSeeds}}
+	"{{.FixtureImport}}"
+{{- end}}
 )
 
 // Ensure imports are used.
 var _ = assert.Equal
 
 // setupE2EServer boots the full HTTP stack for {{.EntityName}} against a
-// fresh sqlite database: store → repository → bridge → web handler.
-// migrateE2EDB is defined in e2e_test.go (bootstrap file).
-func setupE2EServer(t *testing.T) *testhttp.Client {
+// fresh sqlite database: store → repository → bridge → web handler. It
+// returns the test DB too so FK parents can be seeded into the same store
+// the server reads. migrateE2EDB is defined in e2e_test.go (bootstrap file).
+func setupE2EServer(t *testing.T) (*testhttp.Client, *testsqlite.TestSQLite) {
 	t.Helper()
 
 	if testing.Short() {
@@ -69,13 +73,31 @@ func setupE2EServer(t *testing.T) *testhttp.Client {
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 
-	return testhttp.New(srv.URL)
+	return testhttp.New(srv.URL), db
+}
+
+// seededCreate{{.EntityName}}Request builds a valid create request, populating
+// foreign-key fields from parent rows seeded into db.
+func seededCreate{{.EntityName}}Request(t *testing.T, db *testsqlite.TestSQLite) Create{{.EntityName}}Request {
+	t.Helper()
+{{- if .FKSeeds}}
+	ctx := context.Background()
+	req := validCreate{{.EntityName}}Request()
+{{- range $i, $s := .FKSeeds}}
+	parent{{$i}} := sqlitefixtures.CreateTest{{$s.ParentEntity}}WithDefaults(t, ctx, db)
+	req.{{$s.RequestField}} = {{$s.ParentPKExpr}}
+{{- end}}
+	return req
+{{- else}}
+	_ = db
+	return validCreate{{.EntityName}}Request()
+{{- end}}
 }
 
 func TestE2E{{.EntityName}}CreateAndGet(t *testing.T) {
-	client := setupE2EServer(t)
+	client, db := setupE2EServer(t)
 
-	resp := client.Post(t, "{{.CreatePath}}", validCreate{{.EntityName}}Request())
+	resp := client.Post(t, "{{.CreatePath}}", seededCreate{{.EntityName}}Request(t, db))
 	resp.RequireStatus(t, 201)
 	id := resp.String(t, "record.{{.PKJSON}}")
 	require.NotEmpty(t, id)
@@ -93,16 +115,16 @@ func TestE2E{{.EntityName}}CreateAndGet(t *testing.T) {
 }
 {{if .HasList}}
 func TestE2E{{.EntityName}}List(t *testing.T) {
-	client := setupE2EServer(t)
+	client, db := setupE2EServer(t)
 
-	client.Post(t, "{{.CreatePath}}", validCreate{{.EntityName}}Request()).RequireStatus(t, 201)
+	client.Post(t, "{{.CreatePath}}", seededCreate{{.EntityName}}Request(t, db)).RequireStatus(t, 201)
 	client.Get(t, "{{.ListPath}}").RequireStatus(t, 200)
 }
 {{end}}{{if .HasDelete}}
 func TestE2E{{.EntityName}}Delete(t *testing.T) {
-	client := setupE2EServer(t)
+	client, db := setupE2EServer(t)
 
-	resp := client.Post(t, "{{.CreatePath}}", validCreate{{.EntityName}}Request())
+	resp := client.Post(t, "{{.CreatePath}}", seededCreate{{.EntityName}}Request(t, db))
 	resp.RequireStatus(t, 201)
 	id := resp.String(t, "record.{{.PKJSON}}")
 	require.NotEmpty(t, id)
@@ -114,10 +136,10 @@ func TestE2E{{.EntityName}}Delete(t *testing.T) {
 }
 {{end}}{{if .HasList}}
 func TestE2E{{.EntityName}}SQLInjection(t *testing.T) {
-	client := setupE2EServer(t)
+	client, db := setupE2EServer(t)
 
 	// One known row — an executed OR-1=1 style injection would leak it.
-	client.Post(t, "{{.CreatePath}}", validCreate{{.EntityName}}Request()).RequireStatus(t, 201)
+	client.Post(t, "{{.CreatePath}}", seededCreate{{.EntityName}}Request(t, db)).RequireStatus(t, 201)
 
 	payloads := []string{
 		` + "`" + `' OR 1=1 --` + "`" + `,
@@ -157,12 +179,12 @@ func TestE2E{{.EntityName}}SQLInjection(t *testing.T) {
 }
 {{end}}{{if .CreateMaxBodySize}}
 func TestE2E{{.EntityName}}OversizedPayload(t *testing.T) {
-	client := setupE2EServer(t)
+	client, db := setupE2EServer(t)
 
 	// A body past the route's max_body_size ({{.CreateMaxBodySize}} bytes) must
 	// be rejected with 413, not accepted or 500'd. Pad a valid request with a
 	// huge string field the server ignores so only the size trips the limit.
-	raw, err := json.Marshal(validCreate{{.EntityName}}Request())
+	raw, err := json.Marshal(seededCreate{{.EntityName}}Request(t, db))
 	require.NoError(t, err)
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(raw, &body))
@@ -172,12 +194,12 @@ func TestE2E{{.EntityName}}OversizedPayload(t *testing.T) {
 }
 {{end}}{{if .HasRecordState}}
 func TestE2E{{.EntityName}}MassAssignment(t *testing.T) {
-	client := setupE2EServer(t)
+	client, db := setupE2EServer(t)
 
 	// A client smuggling record_state into the create body must not control
 	// the stored state — the field is not part of the request model and the
 	// lifecycle routes own all transitions (SEC1/P5).
-	raw, err := json.Marshal(validCreate{{.EntityName}}Request())
+	raw, err := json.Marshal(seededCreate{{.EntityName}}Request(t, db))
 	require.NoError(t, err)
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(raw, &body))
