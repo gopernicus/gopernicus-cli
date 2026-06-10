@@ -172,6 +172,20 @@ func runInit(_ context.Context, args []string) error {
 		}
 	}
 
+	// Pin the in-framework generator tool: `go tool gopernicus` then runs the
+	// exact generator that ships with the framework version the project links,
+	// so emitted code and runtime can never drift.
+	fmt.Printf("  → pinning the gopernicus tool\n")
+	toolEdit := exec.Command("go", "mod", "edit",
+		"-tool=github.com/gopernicus/gopernicus/workshop/gopernicus",
+	)
+	toolEdit.Dir = target
+	toolEdit.Stdout = os.Stdout
+	toolEdit.Stderr = os.Stderr
+	if err := toolEdit.Run(); err != nil {
+		return fmt.Errorf("go mod edit -tool: %w", err)
+	}
+
 	// Run go mod tidy to clean up dependencies.
 	fmt.Printf("  → running go mod tidy\n")
 	tidy := exec.Command("go", "mod", "tidy")
