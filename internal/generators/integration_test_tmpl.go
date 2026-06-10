@@ -13,7 +13,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-{{if .HasList}}
+{{if .NeedsRepoImport}}
 	"{{.RepoImport}}"
 {{end}}
 	fixtures "{{.FixtureImport}}"
@@ -55,10 +55,14 @@ func TestGenerated{{.EntityName}}Store_Create(t *testing.T) {
 	created := fixtures.CreateTest{{.EntityName}}WithDefaults(t, ctx, db)
 	_ = created
 
-	// Verify the record was created and can be retrieved.
+	// Verify the record was created and can be retrieved, every create
+	// field intact (time fields excluded — encoding differs per dialect).
 	result, err := store.Get(ctx, created.{{.PKGoName}}{{range .GetExtraCallArgs}}, {{.}}{{end}})
 	require.NoError(t, err)
 	assert.Equal(t, created.{{.PKGoName}}, result.{{.PKGoName}})
+{{- range .RoundTripFields}}
+	assert.Equal(t, created.{{.}}, result.{{.}})
+{{- end}}
 }
 {{end}}{{if .HasGet}}
 func TestGenerated{{.EntityName}}Store_Get(t *testing.T) {
@@ -153,6 +157,64 @@ func TestGenerated{{.EntityName}}Store_SoftDelete(t *testing.T) {
 	result, err := store.Get(ctx, created.{{.PKGoName}}{{range .GetExtraCallArgs}}, {{.}}{{end}})
 	require.NoError(t, err)
 	assert.Equal(t, "deleted", result.RecordState)
+}
+{{end}}{{if .HasDuplicateTest}}
+func TestGenerated{{.EntityName}}Store_CreateDuplicate(t *testing.T) {
+	ctx, db, store := setupTestStore(t)
+	pgxfixtures.TruncatePublicSchema(t, ctx, db.Pool)
+
+	created := fixtures.CreateTest{{.EntityName}}WithDefaults(t, ctx, db)
+
+	// Re-creating with the same primary key must map to ErrAlreadyExists.
+	input := {{.RepoPkg}}.Create{{.EntityName}}{
+{{- range .CreateAssigns}}
+		{{.}}: created.{{.}},
+{{- end}}
+	}
+	_, err := store.Create(ctx, input)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, {{.RepoPkg}}.Err{{.EntityName}}AlreadyExists)
+}
+{{end}}{{if .HasFKViolationTest}}
+func TestGenerated{{.EntityName}}Store_CreateInvalidReference(t *testing.T) {
+	ctx, db, store := setupTestStore(t)
+	pgxfixtures.TruncatePublicSchema(t, ctx, db.Pool)
+
+	created := fixtures.CreateTest{{.EntityName}}WithDefaults(t, ctx, db)
+
+	// A create referencing a missing parent must map to ErrInvalidReference.
+	input := {{.RepoPkg}}.Create{{.EntityName}}{
+{{- range .CreateAssigns}}
+		{{.}}: created.{{.}},
+{{- end}}
+	}
+{{- if .PKReplacementExpr}}
+	input.{{.PKGoName}} = {{.PKReplacementExpr}}
+{{- end}}
+	bogusFK := {{.FKViolationExpr}}
+	input.{{.FKViolationGoName}} = {{if .FKViolationIsPointer}}&bogusFK{{else}}bogusFK{{end}}
+	_, err := store.Create(ctx, input)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, {{.RepoPkg}}.Err{{.EntityName}}InvalidReference)
+}
+{{end}}{{if .HasUpdateMutation}}
+func TestGenerated{{.EntityName}}Store_Update(t *testing.T) {
+	ctx, db, store := setupTestStore(t)
+	pgxfixtures.TruncatePublicSchema(t, ctx, db.Pool)
+
+	created := fixtures.CreateTest{{.EntityName}}WithDefaults(t, ctx, db)
+
+	newValue := "updated-value"
+	result, err := store.Update(ctx, created.{{.PKGoName}}{{range .GetExtraCallArgs}}, {{.}}{{end}}, {{.RepoPkg}}.Update{{.EntityName}}{
+		{{.UpdateFieldGoName}}: &newValue,
+	})
+	require.NoError(t, err)
+{{- if .UpdateFieldEntityPointer}}
+	require.NotNil(t, result.{{.UpdateFieldGoName}})
+	assert.Equal(t, newValue, *result.{{.UpdateFieldGoName}})
+{{- else}}
+	assert.Equal(t, newValue, result.{{.UpdateFieldGoName}})
+{{- end}}
 }
 {{end}}
 `

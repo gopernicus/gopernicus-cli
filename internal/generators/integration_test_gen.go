@@ -72,6 +72,32 @@ type IntegrationTestData struct {
 	HasSoftDelete bool
 	HasHardDelete bool
 
+	// Enrichment: sentinel-error and round-trip coverage. All computed from
+	// the create/update @fields so the tests construct real inputs.
+	NeedsRepoImport bool     // any test references the repo package
+	CreateAssigns   []string // create-field GoNames copied from the fixture entity
+	RoundTripFields []string // create-field GoNames asserted equal after Get (non-time)
+
+	// Duplicate-create → ErrAlreadyExists. Requires the PK among @fields so
+	// copying the fixture's PK collides.
+	HasDuplicateTest bool
+
+	// Bogus-FK create → ErrInvalidReference.
+	HasFKViolationTest   bool
+	FKViolationGoName    string // create-field GoName of a non-self FK
+	FKViolationExpr      string // string literal for the bogus FK value
+	FKViolationIsPointer bool   // create-field is a pointer — take the address
+	// PKReplacementExpr, when non-empty, replaces the copied PK so the dup
+	// constraint doesn't mask the FK violation.
+	PKReplacementExpr string
+
+	// Update-mutation test (update_returning only — plain updates return no
+	// entity). The chosen field is a non-enum string without a tight
+	// MaxLength; entity-side pointer-ness drives the assertion.
+	HasUpdateMutation        bool
+	UpdateFieldGoName        string
+	UpdateFieldEntityPointer bool
+
 	// Domain info
 	DomainName string
 
@@ -195,7 +221,115 @@ func BuildIntegrationTestData(resolved *ResolvedFile, modulePath, dbName string)
 		data.Methods = append(data.Methods, tm)
 	}
 
+	buildEnrichmentData(&data, resolved, methods)
+
 	return data, nil
+}
+
+// buildEnrichmentData computes the sentinel-error, round-trip, and
+// update-mutation test inputs from the create/update @fields.
+func buildEnrichmentData(data *IntegrationTestData, resolved *ResolvedFile, methods []MethodSig) {
+	// Self-referential FK columns are excluded from the bogus-FK test (the
+	// fixtures leave them nil by design).
+	selfRefCols := make(map[string]bool)
+	if resolved.Table != nil {
+		for _, fk := range resolved.Table.ForeignKeys {
+			if fk.RefTable == resolved.TableName {
+				for _, col := range fk.Columns {
+					selfRefCols[col] = true
+				}
+			}
+		}
+	}
+
+	var createFields, updateFields []FieldInfo
+	hasUpdateReturning := false
+	for i, m := range methods {
+		rq := resolved.Queries[i]
+		switch m.Category {
+		case "create":
+			if len(createFields) == 0 {
+				createFields = rq.InsertFields
+			}
+		case "update_returning":
+			if m.Name == "Update" {
+				hasUpdateReturning = true
+				if len(updateFields) == 0 {
+					updateFields = rq.SetFields
+				}
+			}
+		}
+	}
+
+	pkInCreate := false
+	for _, f := range createFields {
+		data.CreateAssigns = append(data.CreateAssigns, f.GoName)
+		if !f.IsTime {
+			data.RoundTripFields = append(data.RoundTripFields, f.GoName)
+		}
+		if f.DBName == resolved.PKColumn {
+			pkInCreate = true
+		}
+		if data.FKViolationGoName == "" && f.IsForeignKey && !selfRefCols[f.DBName] &&
+			strings.TrimPrefix(f.GoType, "*") == "string" {
+			data.HasFKViolationTest = true
+			data.FKViolationGoName = f.GoName
+			data.FKViolationIsPointer = strings.HasPrefix(f.GoType, "*")
+			data.FKViolationExpr = `"nonexistent-fk-id"`
+			if strings.EqualFold(fkColumnDBType(resolved, f.DBName), "uuid") {
+				data.FKViolationExpr = `"ffffffff-ffff-4fff-8fff-ffffffffffff"`
+			}
+		}
+	}
+
+	data.HasDuplicateTest = data.HasCreate && pkInCreate && resolved.PKGoType == "string"
+
+	// The FK test must not collide on the copied PK — replace it when the
+	// PK rides along in the create fields.
+	if data.HasFKViolationTest && pkInCreate && resolved.PKGoType == "string" {
+		if pkIsUUID(resolved) {
+			data.PKReplacementExpr = `"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"`
+		} else {
+			data.PKReplacementExpr = `"fk-violation-test-id"`
+		}
+	}
+
+	if hasUpdateReturning {
+		for _, f := range updateFields {
+			tight := f.MaxLength > 0 && f.MaxLength < len("updated-value")
+			if strings.TrimPrefix(f.GoType, "*") == "string" && !f.IsEnum && !tight &&
+				f.DBName != resolved.PKColumn && !f.IsForeignKey {
+				data.HasUpdateMutation = true
+				data.UpdateFieldGoName = f.GoName
+				data.UpdateFieldEntityPointer = entityFieldIsPointer(resolved, f.DBName)
+				break
+			}
+		}
+	}
+
+	data.NeedsRepoImport = data.HasList || data.HasDuplicateTest ||
+		data.HasFKViolationTest || data.HasUpdateMutation
+}
+
+// fkColumnDBType returns the db type of a column by name.
+func fkColumnDBType(resolved *ResolvedFile, dbName string) string {
+	for _, col := range resolved.AllColumns {
+		if col.Name == dbName {
+			return col.DBType
+		}
+	}
+	return ""
+}
+
+// entityFieldIsPointer reports whether the entity struct field for a column
+// is a pointer (nullable column).
+func entityFieldIsPointer(resolved *ResolvedFile, dbName string) bool {
+	for _, col := range resolved.AllColumns {
+		if col.Name == dbName {
+			return strings.HasPrefix(col.GoType, "*")
+		}
+	}
+	return false
 }
 
 // GenerateIntegrationTest produces the generated_test.go file for a pgxstore package.
