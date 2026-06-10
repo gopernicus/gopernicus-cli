@@ -3,14 +3,14 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"github.com/gopernicus/gopernicus-cli/internal/cli"
+	"github.com/gopernicus/gopernicus/workshop/codegen/cli"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	"github.com/gopernicus/gopernicus-cli/internal/fwsource"
-	"github.com/gopernicus/gopernicus-cli/internal/generators"
-	"github.com/gopernicus/gopernicus-cli/internal/scaffold"
+	"github.com/gopernicus/gopernicus/workshop/codegen/fwsource"
+	"github.com/gopernicus/gopernicus/workshop/codegen/generators"
+	"github.com/gopernicus/gopernicus/workshop/codegen/scaffold"
 )
 
 var bootCmd = &cli.Command{

@@ -3,9 +3,9 @@ package cmd
 import (
 	"context"
 
-	"github.com/gopernicus/gopernicus-cli/internal/cli"
-	"github.com/gopernicus/gopernicus-cli/internal/manifest"
-	"github.com/gopernicus/gopernicus-cli/internal/project"
+	"github.com/gopernicus/gopernicus/workshop/codegen/cli"
+	"github.com/gopernicus/gopernicus/workshop/codegen/manifest"
+	"github.com/gopernicus/gopernicus/workshop/codegen/project"
 )
 
 // Execute runs the registered commands against os.Args.

@@ -3,19 +3,19 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"github.com/gopernicus/gopernicus-cli/internal/cli"
+	"github.com/gopernicus/gopernicus/workshop/codegen/cli"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/gopernicus/gopernicus-cli/internal/database"
-	pgxdb "github.com/gopernicus/gopernicus-cli/internal/database/postgres/pgx"
-	sqlitedb "github.com/gopernicus/gopernicus-cli/internal/database/sqlite"
-	"github.com/gopernicus/gopernicus-cli/internal/env"
-	"github.com/gopernicus/gopernicus-cli/internal/manifest"
-	"github.com/gopernicus/gopernicus-cli/internal/project"
-	"github.com/gopernicus/gopernicus-cli/internal/schema"
+	"github.com/gopernicus/gopernicus/workshop/codegen/database"
+	pgxdb "github.com/gopernicus/gopernicus/workshop/codegen/database/postgres/pgx"
+	sqlitedb "github.com/gopernicus/gopernicus/workshop/codegen/database/sqlite"
+	"github.com/gopernicus/gopernicus/workshop/codegen/env"
+	"github.com/gopernicus/gopernicus/workshop/codegen/manifest"
+	"github.com/gopernicus/gopernicus/workshop/codegen/project"
+	"github.com/gopernicus/gopernicus/workshop/codegen/schema"
 )
 
 var dbCmd = &cli.Command{

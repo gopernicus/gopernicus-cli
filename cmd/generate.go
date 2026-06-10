@@ -3,9 +3,9 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"github.com/gopernicus/gopernicus-cli/internal/cli"
+	"github.com/gopernicus/gopernicus/workshop/codegen/cli"
 
-	"github.com/gopernicus/gopernicus-cli/internal/generators"
+	"github.com/gopernicus/gopernicus/workshop/codegen/generators"
 )
 
 func init() {

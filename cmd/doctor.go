@@ -4,16 +4,16 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"github.com/gopernicus/gopernicus-cli/internal/cli"
+	"github.com/gopernicus/gopernicus/workshop/codegen/cli"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/gopernicus/gopernicus-cli/internal/generators"
-	"github.com/gopernicus/gopernicus-cli/internal/goversion"
-	"github.com/gopernicus/gopernicus-cli/internal/manifest"
-	"github.com/gopernicus/gopernicus-cli/internal/project"
-	"github.com/gopernicus/gopernicus-cli/internal/sqlguard"
+	"github.com/gopernicus/gopernicus/workshop/codegen/generators"
+	"github.com/gopernicus/gopernicus/workshop/codegen/goversion"
+	"github.com/gopernicus/gopernicus/workshop/codegen/manifest"
+	"github.com/gopernicus/gopernicus/workshop/codegen/project"
+	"github.com/gopernicus/gopernicus/workshop/codegen/sqlguard"
 )
 
 func init() {

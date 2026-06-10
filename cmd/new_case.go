@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gopernicus/gopernicus-cli/internal/generators"
-	"github.com/gopernicus/gopernicus-cli/internal/project"
+	"github.com/gopernicus/gopernicus/workshop/codegen/generators"
+	"github.com/gopernicus/gopernicus/workshop/codegen/project"
 )
 
 func runNewCase(_ context.Context, args []string) error {

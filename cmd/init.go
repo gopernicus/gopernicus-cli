@@ -4,17 +4,17 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/gopernicus/gopernicus-cli/internal/cli"
+	"github.com/gopernicus/gopernicus/workshop/codegen/cli"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
-	"github.com/gopernicus/gopernicus-cli/internal/fwsource"
-	"github.com/gopernicus/gopernicus-cli/internal/generators"
-	"github.com/gopernicus/gopernicus-cli/internal/goversion"
-	"github.com/gopernicus/gopernicus-cli/internal/manifest"
+	"github.com/gopernicus/gopernicus/workshop/codegen/fwsource"
+	"github.com/gopernicus/gopernicus/workshop/codegen/generators"
+	"github.com/gopernicus/gopernicus/workshop/codegen/goversion"
+	"github.com/gopernicus/gopernicus/workshop/codegen/manifest"
 	"github.com/gopernicus/gopernicus-cli/internal/tui"
 )
 

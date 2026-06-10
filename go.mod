@@ -7,12 +7,15 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/term v0.2.2
-	github.com/jackc/pgx/v5 v5.8.0
-	github.com/joho/godotenv v1.5.1
-	github.com/pganalyze/pg_query_go/v6 v6.1.0
-	github.com/wasilibs/go-pgquery v0.0.0-20250409022910-10ac41983c07
-	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.52.0
+)
+
+require (
+	github.com/jackc/pgx/v5 v5.8.0 // indirect
+	github.com/joho/godotenv v1.5.1 // indirect
+	github.com/pganalyze/pg_query_go/v6 v6.1.0 // indirect
+	github.com/wasilibs/go-pgquery v0.0.0-20250409022910-10ac41983c07 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+	modernc.org/sqlite v1.52.0 // indirect
 )
 
 require (
@@ -27,6 +30,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/gopernicus/gopernicus v0.0.0
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
@@ -47,9 +51,11 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.29.0 // indirect
-	google.golang.org/protobuf v1.31.0 // indirect
+	golang.org/x/text v0.34.0 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+replace github.com/gopernicus/gopernicus => ../gopernicus
