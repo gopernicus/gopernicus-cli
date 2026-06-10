@@ -185,6 +185,18 @@ func (s *Store) {{.Name}}({{.Params}}) error {
 }
 {{- end}}
 {{- end}}
+{{- if .UpdateKeyParams}}
+
+// Update shadows the embedded single-key verb with this entity's composite
+// key, delegating to the generic engine (UpdateBy maps errors via the Spec).
+func (s *Store) Update(ctx context.Context, {{range .UpdateKeyParams}}{{.GoVar}} {{.GoType}}, {{end}}input {{.UpdateTypeExpr}}) ({{.RepoPkg}}.{{.EntityName}}, error) {
+	return s.Store.UpdateBy(ctx, []crud.KeyVal{
+{{- range .UpdateKeyParams}}
+		{Col: "{{.Col}}", Val: {{.GoVar}}},
+{{- end}}
+	}, input)
+}
+{{- end}}
 {{- if .HasCustom}}
 
 func (s *Store) mapErr(err error) error {

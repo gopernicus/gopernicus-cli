@@ -102,6 +102,11 @@ type SpecStoreData struct {
 	CreateSets   []SpecSet
 	UpdateFields []SpecSet
 
+	// UpdateKeyParams, when set, marks a composite-key entity: a wrapper
+	// Update is emitted shadowing the generic single-key verb, delegating
+	// to crud.Store.UpdateBy with one KeyVal per entry (query param order).
+	UpdateKeyParams []SpecKeyParam
+
 	HasCreatedAt        bool
 	HasUpdatedAt        bool
 	AutoNowCreateJoined string // quoted, comma-joined AutoNowCreate columns
@@ -338,11 +343,28 @@ func BuildSpecStoreData(resolved *ResolvedFile, modulePath string) (SpecStoreDat
 				data.Skipped = append(data.Skipped, SpecSkippedFunc{Name: rq.FuncName, Reason: "uses the transactional outbox"})
 				continue
 			}
-			if rq.FuncName != "Update" || !specParamsArePK(rq, resolved.PKColumn) || len(rq.ReturnFields) > 0 {
+			singleKey := specParamsArePK(rq, resolved.PKColumn)
+			compositeKey := specParamsAreCompositePK(rq, resolved)
+			if rq.FuncName != "Update" || (!singleKey && !compositeKey) || len(rq.ReturnFields) > 0 {
 				data.Skipped = append(data.Skipped, SpecSkippedFunc{Name: rq.FuncName, Reason: "non-standard update; hand-write in store.go"})
 				continue
 			}
 			hasUpdateQuery = true
+			if compositeKey {
+				// The generic Update verb is single-key; emit a wrapper that
+				// shadows it, delegating to UpdateBy with every key column.
+				for _, p := range rq.Params {
+					goType := "string"
+					if t, ok := rq.ParamTypes[p]; ok {
+						goType = t
+					}
+					data.UpdateKeyParams = append(data.UpdateKeyParams, SpecKeyParam{
+						Col:    p,
+						GoVar:  ToCamelCase(p),
+						GoType: goType,
+					})
+				}
+			}
 			for _, f := range rq.SetFields {
 				if !updateSeen[f.DBName] {
 					updateSeen[f.DBName] = true
@@ -591,6 +613,37 @@ func specRecordStateTransition(rq ResolvedQuery, tableName, pkColumn string) (st
 // primary key column.
 func specParamsArePK(rq ResolvedQuery, pkColumn string) bool {
 	return len(rq.Params) == 1 && rq.Params[0] == pkColumn
+}
+
+// SpecKeyParam is one key column of a composite-key Update wrapper: the db
+// column, the Go parameter name, and its Go type.
+type SpecKeyParam struct {
+	Col    string
+	GoVar  string
+	GoType string
+}
+
+// specParamsAreCompositePK reports whether the query's params are exactly the
+// table's composite primary key columns (any order; the param order drives
+// the generated signature).
+func specParamsAreCompositePK(rq ResolvedQuery, resolved *ResolvedFile) bool {
+	if resolved.Table == nil || resolved.Table.PrimaryKey == nil {
+		return false
+	}
+	pkCols := resolved.Table.PrimaryKey.Columns
+	if len(pkCols) < 2 || len(rq.Params) != len(pkCols) {
+		return false
+	}
+	want := make(map[string]bool, len(pkCols))
+	for _, c := range pkCols {
+		want[c] = true
+	}
+	for _, p := range rq.Params {
+		if !want[p] {
+			return false
+		}
+	}
+	return true
 }
 
 func specColumnNames(cols []schema.ColumnInfo) []string {
