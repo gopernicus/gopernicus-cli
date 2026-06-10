@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/gopernicus/gopernicus/workshop/codegen/cli"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/gopernicus/gopernicus/workshop/codegen/cli"
 	"github.com/gopernicus/gopernicus/workshop/codegen/fwsource"
 	"github.com/gopernicus/gopernicus/workshop/codegen/generators"
 	"github.com/gopernicus/gopernicus/workshop/codegen/goversion"
@@ -186,9 +186,13 @@ func runInit(_ context.Context, args []string) error {
 		return fmt.Errorf("go mod edit -tool: %w", err)
 	}
 
-	// Run go mod tidy to clean up dependencies.
+	// Run go mod tidy to resolve the framework dependency and sums. The
+	// scaffolded server wiring imports satisfier packages that are emitted by
+	// the generate step below, so unresolvable project-internal imports are
+	// tolerated here (-e); the post-generation tidy below settles the module
+	// files once those packages exist.
 	fmt.Printf("  → running go mod tidy\n")
-	tidy := exec.Command("go", "mod", "tidy")
+	tidy := exec.Command("go", "mod", "tidy", "-e")
 	tidy.Dir = target
 	tidy.Stdout = os.Stdout
 	tidy.Stderr = os.Stderr
@@ -196,15 +200,26 @@ func runInit(_ context.Context, args []string) error {
 		fmt.Printf("  warning: go mod tidy failed: %v\n", err)
 	}
 
-	// Generate the feature repositories' code, tests, and fixtures from the
-	// copied queries.sql + reflected schema, so the project is complete out
-	// of the box. Best-effort: a failure here leaves a valid scaffold the
-	// user can regenerate manually, so it must not fail init.
+	// Generate the feature repositories' code, tests, fixtures, and feature
+	// satisfiers from the copied queries.sql + reflected schema, so the
+	// project is complete out of the box. Best-effort: a failure here leaves
+	// a valid scaffold the user can regenerate manually, so it must not fail
+	// init.
 	if opts.features.any() {
 		fmt.Printf("  → generating repositories\n")
 		if err := runInitGenerate(target); err != nil {
 			fmt.Printf("  warning: generation skipped (%v)\n", err)
 			fmt.Printf("           run 'gopernicus generate' after 'db reflect' to populate tests/fixtures\n")
+		}
+
+		// Final tidy now that generation has emitted the satisfier packages
+		// the server wiring imports.
+		finalTidy := exec.Command("go", "mod", "tidy")
+		finalTidy.Dir = target
+		finalTidy.Stdout = os.Stdout
+		finalTidy.Stderr = os.Stderr
+		if err := finalTidy.Run(); err != nil {
+			fmt.Printf("  warning: go mod tidy failed: %v\n", err)
 		}
 	}
 
@@ -876,37 +891,11 @@ func copyFeatureAssets(target, modulePath, projectName, fwVersion string, featur
 		}
 	}
 
-	// Copy satisfiers into their respective domain packages.
-	if features.Authentication {
-		fmt.Printf("  → copying authentication satisfiers\n")
-		satSrc := filepath.Join(source, "core", "auth", "authentication", "satisfiers")
-		satDst := filepath.Join(target, "core", "auth", "authentication", "satisfiers")
-		if err := copyDirRecursive(satSrc, satDst); err != nil {
-			return fmt.Errorf("copying authentication satisfiers: %w", err)
-		}
+	// Satisfiers are GENERATED into the project by 'gopernicus generate'
+	// (they wrap project repo types), and the hand-written auth bridges
+	// (bridge/auth/authentication, bridge/auth/invitations) are IMPORTED from
+	// the framework — neither is copied anymore.
 
-		fmt.Printf("  → copying authentication bridge\n")
-		authBridgeSrc := filepath.Join(source, "bridge", "auth", "authentication")
-		authBridgeDst := filepath.Join(target, "bridge", "auth", "authentication")
-		if err := copyDirRecursive(authBridgeSrc, authBridgeDst); err != nil {
-			return fmt.Errorf("copying authentication bridge: %w", err)
-		}
-	}
-	if features.Authorization {
-		fmt.Printf("  → copying authorization satisfiers\n")
-		satSrc := filepath.Join(source, "core", "auth", "authorization", "satisfiers")
-		satDst := filepath.Join(target, "core", "auth", "authorization", "satisfiers")
-		if err := copyDirRecursive(satSrc, satDst); err != nil {
-			return fmt.Errorf("copying authorization satisfiers: %w", err)
-		}
-
-		fmt.Printf("  → copying invitations bridge\n")
-		invBridgeSrc := filepath.Join(source, "bridge", "auth", "invitations")
-		invBridgeDst := filepath.Join(target, "bridge", "auth", "invitations")
-		if err := copyDirRecursive(invBridgeSrc, invBridgeDst); err != nil {
-			return fmt.Errorf("copying invitations bridge: %w", err)
-		}
-	}
 	// Copy AI companion files when Claude is selected.
 	if ai.Claude {
 		claudeMDSrc := filepath.Join(source, "CLAUDE.md")
@@ -949,7 +938,7 @@ func copyFeatureAssets(target, modulePath, projectName, fwVersion string, featur
 	// Rewrite import paths in all copied .go files.
 	if modulePath != gopernicusModule {
 		fmt.Printf("  → rewriting import paths\n")
-		for _, layer := range []string{"core/repositories", "core/auth/authentication/satisfiers", "core/auth/authorization/satisfiers", "bridge/repositories"} {
+		for _, layer := range []string{"core/repositories", "bridge/repositories"} {
 			dir := filepath.Join(target, layer)
 			if _, err := os.Stat(dir); err != nil {
 				continue
