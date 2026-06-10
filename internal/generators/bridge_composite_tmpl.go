@@ -71,5 +71,3 @@ func (b *Bridges) AuthSchema() []authorization.ResourceSchema {
 }
 {{- end}}
 `
-
-// No bootstrap template needed — no more GeneratedBridges/Bridges alias ceremony.

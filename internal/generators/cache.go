@@ -33,13 +33,14 @@ type WriteMethod struct {
 
 // CacheTemplateData holds all data needed to render cache templates.
 type CacheTemplateData struct {
-	FrameworkPath string // gopernicus framework module path (for infra cache import)
-	PackageName   string
-	EntityName    string
-	KeyPrefix     string // cache key prefix, e.g. "auth:users"
-	MultiHomed    bool   // entity hosted by >1 database — emit NewCacheStoreWithKeyPrefix
-	CachedMethods []CachedMethod
-	WriteMethods  []WriteMethod
+	FrameworkPath  string // gopernicus framework module path (for infra cache import)
+	PackageName    string
+	EntityName     string
+	KeyPrefix      string // cache key prefix, e.g. "auth:users"
+	MultiHomed     bool   // entity hosted by >1 database — emit NewCacheStoreWithKeyPrefix
+	NeedsFmtImport bool   // a cached method's key expression uses fmt.Sprint
+	CachedMethods  []CachedMethod
+	WriteMethods   []WriteMethod
 }
 
 // GenerateCache produces cache layer files for a repository.
@@ -125,6 +126,8 @@ func buildCacheData(resolved *ResolvedFile) (CacheTemplateData, error) {
 			keyExpr := "fmt.Sprint(" + strings.Join(m.PKParams, ", ") + ")"
 			if len(m.PKParams) == 1 {
 				keyExpr = m.PKParams[0]
+			} else {
+				data.NeedsFmtImport = true
 			}
 
 			data.CachedMethods = append(data.CachedMethods, CachedMethod{

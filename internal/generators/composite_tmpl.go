@@ -154,5 +154,3 @@ type Repositories struct {
 type TxRunner func(ctx context.Context, fn func(crud.Querier) error) error
 {{- end}}
 `
-
-// No bootstrap template needed — no more GeneratedRepositories/Repositories alias ceremony.
