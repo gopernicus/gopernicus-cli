@@ -508,7 +508,7 @@ func WithEventBus(bus events.Bus) Option {
 func NewRepository(store Storer, opts ...Option) *Repository {
 	r := &Repository{
 		store:      store,
-		generateID: cryptids.GenerateID,
+		generateID: cryptids.{{if .PKIsUUID}}GenerateUUID{{else}}GenerateID{{end}},
 	}
 	for _, opt := range opts {
 		opt(r)

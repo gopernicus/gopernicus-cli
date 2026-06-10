@@ -42,7 +42,7 @@ func CreateTest{{$e.EntityName}}(t *testing.T, ctx context.Context, db *testpgx.
 	require.NoError(t, err)
 	_ = testUniqueID
 {{if and (eq $e.PKGoType "string") (not $e.PKIsFK)}}
-	{{camel $e.PKColumn}}, err := cryptids.GenerateID()
+	{{camel $e.PKColumn}}, err := cryptids.{{if $e.PKIsUUID}}GenerateUUID{{else}}GenerateID{{end}}()
 	require.NoError(t, err)
 {{end}}{{if $e.HasPrincipalInheritance}}
 	// Principal inheritance: insert into principals first.

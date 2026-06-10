@@ -29,6 +29,18 @@ type ParentFixture struct {
 }
 
 // FixtureEntity describes a single entity for fixture generation.
+// pkIsUUID reports whether the resolved entity's primary key is a uuid
+// column. uuid PKs need GenerateUUID — GenerateID's URL-safe alphabet is
+// rejected by the uuid type.
+func pkIsUUID(resolved *ResolvedFile) bool {
+	for _, col := range resolved.AllColumns {
+		if col.Name == resolved.PKColumn {
+			return strings.EqualFold(col.DBType, "uuid")
+		}
+	}
+	return false
+}
+
 type FixtureEntity struct {
 	EntityName  string // PascalCase singular, e.g. "User"
 	EntityLower string // lowercase singular, e.g. "user"
@@ -41,6 +53,7 @@ type FixtureEntity struct {
 	PKGoName   string // e.g. "UserID"
 	PKGoType   string // e.g. "string"
 	PKIsFK     bool   // true if PK is also a FK (use param, don't generate)
+	PKIsUUID   bool   // true when the PK column is a uuid — GenerateID's alphabet is rejected
 
 	// InsertFields are the columns the fixture INSERT will populate.
 	InsertFields []FixtureField
@@ -97,6 +110,7 @@ func BuildFixtureEntity(resolved *ResolvedFile, modulePath string) FixtureEntity
 		PKColumn:    resolved.PKColumn,
 		PKGoName:    resolved.PKGoName,
 		PKGoType:    resolved.PKGoType,
+		PKIsUUID:    pkIsUUID(resolved),
 	}
 
 	// Build FK parent fixtures from the table's foreign keys.
@@ -190,6 +204,21 @@ func BuildFixtureEntity(resolved *ResolvedFile, modulePath string) FixtureEntity
 						entity.InsertFields[i].TestDefault = fmt.Sprintf("%q", vals[0])
 					}
 				}
+			}
+		}
+	}
+
+	// Native enum types (pg CREATE TYPE ... AS ENUM) carry their labels on
+	// the reflected column rather than a CHECK constraint — same coercion,
+	// first label wins.
+	for i, f := range entity.InsertFields {
+		if f.IsForeignKey {
+			continue
+		}
+		for _, col := range resolved.AllColumns {
+			if col.Name == f.DBName && col.IsEnum && len(col.EnumValues) > 0 {
+				entity.InsertFields[i].TestDefault = fmt.Sprintf("%q", col.EnumValues[0])
+				break
 			}
 		}
 	}

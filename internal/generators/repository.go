@@ -137,7 +137,10 @@ type RepoTemplateData struct {
 	// only valid when record_state is among the create @fields — otherwise
 	// the column's SQL default applies and the Create model has no field.
 	HasRecordStateInCreate bool
-	DefaultDirection       string
+	// PKIsUUID selects cryptids.GenerateUUID as the default ID generator —
+	// uuid columns reject GenerateID's URL-safe alphabet.
+	PKIsUUID         bool
+	DefaultDirection string
 
 	// Event generation (from @event annotations).
 	HasEvents bool
@@ -475,6 +478,7 @@ func buildRepoTemplateData(resolved *ResolvedFile) (RepoTemplateData, error) {
 		HasSoftDelete:          hasSoftDelete,
 		HasPKInCreate:          hasPKInCreate,
 		HasRecordStateInCreate: hasRecordStateInCreate,
+		PKIsUUID:               pkIsUUID(resolved),
 		DefaultDirection:  defaultDirection,
 		HasEvents:         true,
 		Events:            events,
