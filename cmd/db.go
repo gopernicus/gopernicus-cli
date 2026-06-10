@@ -10,6 +10,7 @@ import (
 
 	"github.com/gopernicus/gopernicus-cli/internal/database"
 	pgxdb "github.com/gopernicus/gopernicus-cli/internal/database/postgres/pgx"
+	sqlitedb "github.com/gopernicus/gopernicus-cli/internal/database/sqlite"
 	"github.com/gopernicus/gopernicus-cli/internal/env"
 	"github.com/gopernicus/gopernicus-cli/internal/manifest"
 	"github.com/gopernicus/gopernicus-cli/internal/project"
@@ -28,6 +29,16 @@ func init() {
 		{
 			Name:  "migrate",
 			Short: "Run pending migrations",
+			Long: `Apply pending SQL migration files from workshop/migrations/{db}/ in order.
+
+Applied migrations are recorded (filename + sha256 checksum) in a
+schema_migrations table. Modifying an already-applied file is a hard error —
+create a new migration instead. Forward-only: there are no rollbacks.
+
+For databases with driver "sqlite", the configured URL is the database file
+path. Unlike 'db reflect', 'db migrate' creates the database file (and parent
+directories) if it does not exist, so the first migration can bootstrap a
+fresh database.`,
 			Usage: "gopernicus db migrate [--db-url <url>]",
 			Run:   runDBMigrate,
 		},
@@ -41,6 +52,10 @@ Connects to the database using the env var specified in gopernicus.yml
 
   workshop/migrations/{db}/_schema.json  — machine-readable schema (consumed by 'gopernicus generate')
   workshop/migrations/{db}/_schema.sql   — human-readable SQL summary
+
+For databases with driver "sqlite", the env var holds the database file path
+instead of a connection URL: an absolute path, a path relative to the project
+root, a sqlite:// URL, or a file: URI (passed to the driver verbatim).
 
 The .env file at the project root is loaded automatically.
 Override the env file path in gopernicus.yml:
@@ -88,7 +103,9 @@ func runDB(_ context.Context, args []string) error {
 }
 
 func runDBMigrate(ctx context.Context, args []string) error {
-	driver, root, _, err := connectDriver(ctx, args)
+	// createIfMissing: for sqlite, 'db migrate' against a missing database
+	// file bootstraps it — unlike 'db reflect', which refuses to create one.
+	driver, root, _, err := connectDriver(ctx, args, true)
 	if err != nil {
 		return err
 	}
@@ -98,7 +115,7 @@ func runDBMigrate(ctx context.Context, args []string) error {
 	migrationsDir := filepath.Join(root, manifest.MigrationsDir(dbName))
 	fmt.Printf("Running migrations from %s...\n", migrationsDir)
 
-	mg, ok := database.Driver(driver).(database.Migrator)
+	mg, ok := driver.(database.Migrator)
 	if !ok {
 		return fmt.Errorf("%s does not support migrations", driver.DBName())
 	}
@@ -110,7 +127,7 @@ func runDBMigrate(ctx context.Context, args []string) error {
 }
 
 func runDBReflect(ctx context.Context, args []string) error {
-	driver, root, m, err := connectDriver(ctx, args)
+	driver, root, m, err := connectDriver(ctx, args, false)
 	if err != nil {
 		return err
 	}
@@ -122,7 +139,7 @@ func runDBReflect(ctx context.Context, args []string) error {
 		schemas = dbConf.SchemasOrDefault()
 	}
 
-	ref, ok := database.Driver(driver).(database.Reflector)
+	ref, ok := driver.(database.Reflector)
 	if !ok {
 		return fmt.Errorf("%s does not support schema reflection", driver.DBName())
 	}
@@ -172,12 +189,24 @@ func runDBStatus(ctx context.Context, args []string) error {
 	dbName := dbNameFromArgs(args)
 	migrationsDir := filepath.Join(root, manifest.MigrationsDir(dbName))
 
-	// DB connection is best-effort for status — show file list even if unavailable
+	// DB connection is best-effort for status — show the file list (all
+	// pending) even when the database is unreachable or, for sqlite, the
+	// database file does not exist yet.
+	driverName, _ := m.DatabaseOrDefault(dbName).DriverOrDefault()
+
 	var statuses []database.MigrationStatus
 	if dbURL, urlErr := resolveDBURL(args, m, root); urlErr == nil && dbURL != "" {
-		if d, connErr := pgxdb.New(ctx, dbURL); connErr == nil && d.Ping(ctx) == nil {
+		var d database.Driver
+		var connErr error
+		switch driverName {
+		case manifest.DriverSQLite:
+			d, connErr = sqlitedb.New(ctx, sqlitedb.ResolvePath(dbURL, root))
+		case manifest.DriverPostgres:
+			d, connErr = pgxdb.New(ctx, dbURL)
+		}
+		if connErr == nil && d != nil && d.Ping(ctx) == nil {
 			defer d.Close()
-			if mg, ok := database.Driver(d).(database.Migrator); ok {
+			if mg, ok := d.(database.Migrator); ok {
 				statuses, err = mg.MigrationStatus(ctx, migrationsDir)
 				if err != nil {
 					return err
@@ -277,7 +306,12 @@ func runDBCreate(_ context.Context, args []string) error {
 // the DB URL, connects, and pings. The --db flag selects which database from
 // the manifest (defaults to "primary"). Returns the driver, project root, and
 // manifest. The caller must call driver.Close().
-func connectDriver(ctx context.Context, args []string) (*pgxdb.Driver, string, *manifest.Manifest, error) {
+//
+// For sqlite databases the URL is a file path (relative paths resolve against
+// the project root); see internal/database/sqlite for the full convention.
+// createIfMissing applies to sqlite only: when true (db migrate), a missing
+// database file is created; when false (db reflect), it is an error.
+func connectDriver(ctx context.Context, args []string, createIfMissing bool) (database.Driver, string, *manifest.Manifest, error) {
 	root, err := project.MustFindRoot()
 	if err != nil {
 		return nil, "", nil, err
@@ -293,19 +327,24 @@ func connectDriver(ctx context.Context, args []string) (*pgxdb.Driver, string, *
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("database %q: %w", dbName, err)
 	}
-	if driverName == manifest.DriverSQLite {
-		return nil, "", nil, fmt.Errorf(
-			"database %q uses driver %q: sqlite migrations and reflection are not yet supported — planned for Phase 2",
-			dbName, manifest.DriverSQLite,
-		)
-	}
 
 	dbURL, err := resolveDBURL(args, m, root)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	driver, err := pgxdb.New(ctx, dbURL)
+	var driver database.Driver
+	switch driverName {
+	case manifest.DriverSQLite:
+		path := sqlitedb.ResolvePath(dbURL, root)
+		if createIfMissing {
+			driver, err = sqlitedb.NewCreateIfMissing(ctx, path)
+		} else {
+			driver, err = sqlitedb.New(ctx, path)
+		}
+	default:
+		driver, err = pgxdb.New(ctx, dbURL)
+	}
 	if err != nil {
 		return nil, "", nil, err
 	}

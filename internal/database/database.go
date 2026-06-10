@@ -3,6 +3,7 @@
 // Adapters live in sub-packages named by database engine and Go driver:
 //
 //	internal/database/postgres/pgx  — PostgreSQL via pgx/v5
+//	internal/database/sqlite        — SQLite via modernc.org/sqlite
 //
 // Commands depend only on this package, never on a specific adapter.
 // Each capability is a separate interface; adapters implement only what their
