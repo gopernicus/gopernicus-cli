@@ -42,6 +42,14 @@ type BridgeE2EData struct {
 	// HasRecordState gates the mass-assignment probe: a POST smuggling a
 	// record_state value must not control the stored state (SEC1/P5).
 	HasRecordState bool
+
+	// String filter params (plus "search") get the strict probe: a payload
+	// is a parameterized match value, so a 200 must return zero rows.
+	// Non-string filter params join order/limit/cursor in the never-500
+	// probe only — their parsers ignore unparseable values, legitimately
+	// returning unfiltered results (P2).
+	StringFilterParams []string
+	OtherProbeParams   []string
 }
 
 // GenerateBridgeE2E emits light e2e tests for a bridged entity hosted by a
@@ -126,6 +134,22 @@ func buildBridgeE2EData(data BridgeTemplateData, resolved *ResolvedFile, moduleP
 			e2e.HasRecordState = true
 			break
 		}
+	}
+	for _, lq := range data.ListQueries {
+		if lq.FuncName != "List" {
+			continue
+		}
+		for _, f := range lq.FilterFields {
+			if f.IsString {
+				e2e.StringFilterParams = append(e2e.StringFilterParams, f.DBName)
+			} else {
+				e2e.OtherProbeParams = append(e2e.OtherProbeParams, f.DBName)
+			}
+		}
+		if lq.HasSearch {
+			e2e.StringFilterParams = append(e2e.StringFilterParams, "search")
+		}
+		break
 	}
 
 	pkParam := "{" + resolved.PKColumn + "}"

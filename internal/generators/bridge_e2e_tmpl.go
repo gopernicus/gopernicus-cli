@@ -18,6 +18,9 @@ import (
 	"encoding/json"
 {{- end}}
 	"net/http/httptest"
+{{- if .HasList}}
+	"net/url"
+{{- end}}
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -105,6 +108,49 @@ func TestE2E{{.EntityName}}Delete(t *testing.T) {
 {{- if .HasGet}}
 	client.Get(t, {{.GetPathExpr}}).RequireStatus(t, 404)
 {{- end}}
+}
+{{end}}{{if .HasList}}
+func TestE2E{{.EntityName}}SQLInjection(t *testing.T) {
+	client := setupE2EServer(t)
+
+	// One known row — an executed OR-1=1 style injection would leak it.
+	client.Post(t, "{{.CreatePath}}", validCreate{{.EntityName}}Request()).RequireStatus(t, 201)
+
+	payloads := []string{
+		` + "`" + `' OR 1=1 --` + "`" + `,
+		` + "`" + `'; DROP TABLE zzz_not_a_table; --` + "`" + `,
+		` + "`" + `" OR ""="` + "`" + `,
+	}
+
+	// String filter params are parameterized match values: a payload must
+	// never error the server and must never match the seeded row.
+	stringParams := []string{ {{- range .StringFilterParams}}{{printf "%q" .}}, {{end -}} }
+	for _, param := range stringParams {
+		for _, payload := range payloads {
+			resp := client.Get(t, "{{.ListPath}}?"+url.Values{param: []string{payload}}.Encode())
+			require.Less(t, resp.StatusCode, 500,
+				"param %q payload %q must not cause a server error", param, payload)
+			if resp.StatusCode == 200 {
+				// Empty result sets marshal as data: null — only a non-empty
+				// array is a leak.
+				if data, ok := resp.JSON(t)["data"].([]any); ok {
+					assert.Empty(t, data,
+						"param %q payload %q matched rows — possible injection", param, payload)
+				}
+			}
+		}
+	}
+
+	// Non-string filters and order/limit/cursor reject or ignore garbage —
+	// never a server error.
+	otherParams := []string{ {{- range .OtherProbeParams}}{{printf "%q" .}}, {{end -}} "order", "limit", "cursor"}
+	for _, param := range otherParams {
+		for _, payload := range payloads {
+			resp := client.Get(t, "{{.ListPath}}?"+url.Values{param: []string{payload}}.Encode())
+			require.Less(t, resp.StatusCode, 500,
+				"param %q payload %q must not cause a server error", param, payload)
+		}
+	}
 }
 {{end}}{{if .HasRecordState}}
 func TestE2E{{.EntityName}}MassAssignment(t *testing.T) {
