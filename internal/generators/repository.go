@@ -133,7 +133,11 @@ type RepoTemplateData struct {
 	HasList          bool
 	HasSoftDelete    bool
 	HasPKInCreate    bool
-	DefaultDirection string
+	// HasRecordStateInCreate gates the create-time record_state default:
+	// only valid when record_state is among the create @fields — otherwise
+	// the column's SQL default applies and the Create model has no field.
+	HasRecordStateInCreate bool
+	DefaultDirection       string
 
 	// Event generation (from @event annotations).
 	HasEvents bool
@@ -378,6 +382,7 @@ func buildRepoTemplateData(resolved *ResolvedFile) (RepoTemplateData, error) {
 	}
 
 	hasPKInCreate := resolved.PKGoType == "string" && createSeen[resolved.PKColumn]
+	hasRecordStateInCreate := hasSoftDelete && createSeen["record_state"]
 
 	defaultOrderConst := "OrderByPK"
 	for _, ob := range orderByFields {
@@ -467,8 +472,9 @@ func buildRepoTemplateData(resolved *ResolvedFile) (RepoTemplateData, error) {
 		HasUpdate:         hasUpdate,
 		HasFilter:         hasFilter,
 		HasList:           hasList,
-		HasSoftDelete:     hasSoftDelete,
-		HasPKInCreate:     hasPKInCreate,
+		HasSoftDelete:          hasSoftDelete,
+		HasPKInCreate:          hasPKInCreate,
+		HasRecordStateInCreate: hasRecordStateInCreate,
 		DefaultDirection:  defaultDirection,
 		HasEvents:         true,
 		Events:            events,

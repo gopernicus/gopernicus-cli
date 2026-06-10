@@ -288,7 +288,7 @@ func (r *Repository) {{.Name}}({{.Params}}) ({{$.EntityName}}, error) {
 		input.{{$.PKGoName}} = id
 	}
 {{- end}}
-{{- if $.HasSoftDelete}}
+{{- if $.HasRecordStateInCreate}}
 	if input.RecordState == "" {
 		input.RecordState = "active"
 	}
