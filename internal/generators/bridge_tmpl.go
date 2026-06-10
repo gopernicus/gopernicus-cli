@@ -305,7 +305,8 @@ func (b *Bridge) {{.HandlerName}}(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 {{end}}
-{{- if .DeleteCleanup}}
+{{- /* the method itself is only emitted when HasDeleteRels (auth on) */ -}}
+{{- if and .DeleteCleanup $.HasDeleteRels}}
 	if err := b.deleteAuthRelationships(r.Context(), "{{$.EntitySingular}}", {{.DeleteCleanupGoName}}); err != nil {
 		b.log.ErrorContext(r.Context(), "delete auth relationships", "error", err)
 		web.RespondJSONError(w, web.ErrInternal("delete auth relationships"))
@@ -697,8 +698,8 @@ import (
 	"log/slog"
 
 	"{{.FrameworkPath}}/bridge/transit/httpmid"
-	"{{.FrameworkPath}}/core/auth/authentication"
 {{- if .AuthEnabled}}
+	"{{.FrameworkPath}}/core/auth/authentication"
 	"{{.FrameworkPath}}/core/auth/authorization"
 {{- end}}
 	"{{.FrameworkPath}}/infrastructure/ratelimiter"
@@ -710,8 +711,8 @@ type Bridge struct {
 	{{.EntityNameLower}}Repository *{{.RepoPackage}}.Repository
 	log           *slog.Logger
 	rateLimiter   *ratelimiter.RateLimiter
-	authenticator *authentication.Authenticator
 {{- if .AuthEnabled}}
+	authenticator *authentication.Authenticator
 	authorizer    *authorization.Authorizer
 {{- end}}
 	jsonErrors    httpmid.ErrorRenderer
@@ -736,8 +737,8 @@ func NewBridge(
 	log *slog.Logger,
 	{{.EntityNameLower}}Repository *{{.RepoPackage}}.Repository,
 	rateLimiter *ratelimiter.RateLimiter,
-	authenticator *authentication.Authenticator,
 {{- if .AuthEnabled}}
+	authenticator *authentication.Authenticator,
 	authorizer *authorization.Authorizer,
 {{- end}}
 	opts ...BridgeOption,
@@ -746,8 +747,8 @@ func NewBridge(
 		{{.EntityNameLower}}Repository: {{.EntityNameLower}}Repository,
 		log:           log,
 		rateLimiter:   rateLimiter,
-		authenticator: authenticator,
 {{- if .AuthEnabled}}
+		authenticator: authenticator,
 		authorizer:    authorizer,
 {{- end}}
 		jsonErrors:    httpmid.JSONErrors{},
