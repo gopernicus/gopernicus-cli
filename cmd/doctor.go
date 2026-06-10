@@ -11,6 +11,7 @@ import (
 	"github.com/gopernicus/gopernicus-cli/internal/goversion"
 	"github.com/gopernicus/gopernicus-cli/internal/manifest"
 	"github.com/gopernicus/gopernicus-cli/internal/project"
+	"github.com/gopernicus/gopernicus-cli/internal/sqlguard"
 )
 
 func init() {
@@ -52,6 +53,7 @@ func runDoctor(_ context.Context, _ []string) error {
 		checkWorkshopDir(root),
 		checkFrameworkDep(root),
 	}
+	checks = append(checks, checkSQLGuards(root)...)
 
 	allPassed := true
 	for _, c := range checks {
@@ -120,6 +122,44 @@ func checkWorkshopDir(root string) check {
 		return check{name: "workshop/migrations/", passed: false, detail: "not found — run 'gopernicus init'"}
 	}
 	return check{name: "workshop/migrations/", passed: true}
+}
+
+// checkSQLGuards runs the standing SQL-injection guard over store packages:
+// unsanctioned dynamic concatenation into SQL fails; Pred.Raw usage warns
+// (it is a legitimate escape hatch that deserves review on every run).
+func checkSQLGuards(root string) []check {
+	findings, err := sqlguard.Scan(root)
+	if err != nil {
+		return []check{{name: "sql guards", passed: false, detail: err.Error()}}
+	}
+
+	var concat, raw []sqlguard.Finding
+	for _, f := range findings {
+		if f.Kind == "raw" {
+			raw = append(raw, f)
+		} else {
+			concat = append(concat, f)
+		}
+	}
+
+	checks := make([]check, 0, 2)
+	if len(concat) == 0 {
+		checks = append(checks, check{name: "sql: parameterized queries", passed: true})
+	} else {
+		detail := concat[0].Pos + " " + concat[0].Message
+		if len(concat) > 1 {
+			detail = fmt.Sprintf("%s (+%d more)", detail, len(concat)-1)
+		}
+		checks = append(checks, check{name: "sql: parameterized queries", passed: false, detail: detail})
+	}
+	if len(raw) > 0 {
+		detail := raw[0].Pos + " " + raw[0].Message
+		if len(raw) > 1 {
+			detail = fmt.Sprintf("%s (+%d more)", detail, len(raw)-1)
+		}
+		checks = append(checks, check{name: "sql: Pred.Raw usage", passed: true, warn: true, detail: detail})
+	}
+	return checks
 }
 
 func checkFrameworkDep(root string) check {
