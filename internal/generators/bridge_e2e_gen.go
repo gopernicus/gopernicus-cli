@@ -211,6 +211,18 @@ func buildBridgeE2EData(data BridgeTemplateData, resolved *ResolvedFile, moduleP
 		break
 	}
 
+	// The e2e probes drive routes anonymously (POST → 201, GET → 200). If
+	// any route the suite exercises requires authentication or authorization,
+	// those calls would 401/403 instead — skip e2e for the entity until an
+	// authenticated stack exists (see the security suite for auth coverage).
+	for _, r := range data.Routes {
+		for _, m := range r.MiddlewareChain {
+			if m.Authenticate != "" || m.Authorize != nil {
+				return BridgeE2EData{}, false
+			}
+		}
+	}
+
 	pkParam := "{" + resolved.PKColumn + "}"
 	for _, r := range data.Routes {
 		switch r.FuncName {
