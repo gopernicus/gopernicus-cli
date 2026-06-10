@@ -90,6 +90,10 @@ func GenerateBridge(resolved *ResolvedFile, domainName, modulePath, projectRoot 
 		fmt.Printf("      %s %s\n", verb, path)
 	}
 
+	if err := GenerateBridgeValidationTests(data, bridgeDir, opts); err != nil {
+		return false, fmt.Errorf("bridge validation tests: %w", err)
+	}
+
 	return true, nil
 }
 
