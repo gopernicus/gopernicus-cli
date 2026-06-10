@@ -508,7 +508,9 @@ func buildCreateStoreMethod(m *StoreMethod, rq ResolvedQuery, allColumns []schem
 }
 
 func buildUpdateStoreMethod(m *StoreMethod, rq ResolvedQuery, hasUpdatedAt bool) {
+	setSeen := make(map[string]bool, len(rq.SetFields))
 	for _, f := range rq.SetFields {
+		setSeen[f.DBName] = true
 		m.UpdateFields = append(m.UpdateFields, StoreFieldInfo{
 			GoName: f.GoName,
 			DBName: f.DBName,
@@ -520,7 +522,10 @@ func buildUpdateStoreMethod(m *StoreMethod, rq ResolvedQuery, hasUpdatedAt bool)
 		m.WhereField = rq.Params[0]
 		m.WhereGoVar = ToCamelCase(rq.Params[0])
 	}
-	m.HasUpdatedAt = hasUpdatedAt
+	// updated_at in @fields → caller may supply it, fall back to app-side UTC.
+	// updated_at excluded from @fields → no input field exists; always app-side.
+	m.HasUpdatedAt = hasUpdatedAt && setSeen["updated_at"]
+	m.HasAppUpdatedAt = hasUpdatedAt && !setSeen["updated_at"]
 }
 
 func buildUpdateReturningStoreMethod(m *StoreMethod, rq ResolvedQuery, resolved *ResolvedFile, allCols string, hasUpdatedAt bool) {

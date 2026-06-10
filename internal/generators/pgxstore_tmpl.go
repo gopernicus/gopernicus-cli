@@ -265,6 +265,12 @@ func (s *Store) {{.FuncName}}({{.Params}}) {{.Returns}} {
 		args["updated_at"] = time.Now().UTC()
 	}
 {{- end}}
+{{- if .HasAppUpdatedAt}}
+
+	// updated_at is excluded from @fields — always set app-side.
+	setClauses = append(setClauses, "updated_at = @updated_at")
+	args["updated_at"] = time.Now().UTC()
+{{- end}}
 
 	if len(setClauses) == 0 {
 		return fmt.Errorf("no fields to update")
@@ -305,6 +311,12 @@ func (s *Store) {{.FuncName}}({{.Params}}) {{.Returns}} {
 		setClauses = append(setClauses, "updated_at = @updated_at")
 		args["updated_at"] = time.Now().UTC()
 	}
+{{- end}}
+{{- if .HasAppUpdatedAt}}
+
+	// updated_at is excluded from @fields — always set app-side.
+	setClauses = append(setClauses, "updated_at = @updated_at")
+	args["updated_at"] = time.Now().UTC()
 {{- end}}
 
 	if len(setClauses) == 0 {
