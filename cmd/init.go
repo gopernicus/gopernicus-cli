@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/gopernicus/gopernicus-cli/internal/cli"
 	"io"
 	"os"
 	"os/exec"
@@ -18,7 +19,7 @@ import (
 )
 
 func init() {
-	RegisterCommand(&Command{
+	cli.RegisterCommand(&cli.Command{
 		Name:  "init",
 		Short: "Bootstrap a new gopernicus project",
 		Long: `Bootstrap a new gopernicus project in a new directory.
@@ -89,13 +90,13 @@ func (f featureSelection) enabledFor(name string) bool {
 
 // infrastructureSelection tracks which infrastructure adapters to bootstrap.
 type infrastructureSelection struct {
-	HasRedis       bool // Redis client (enables redis cache; required for Redis Streams)
+	HasRedis        bool // Redis client (enables redis cache; required for Redis Streams)
 	HasRedisStreams bool // Redis Streams event bus backend
-	HasStorageDisk bool // Local disk file storage
-	HasStorageGCS  bool // Google Cloud Storage
-	HasStorageS3   bool // AWS S3 / compatible
-	HasSendGrid    bool // SendGrid email delivery
-	HasTelemetry   bool // Telemetry stack (Jaeger)
+	HasStorageDisk  bool // Local disk file storage
+	HasStorageGCS   bool // Google Cloud Storage
+	HasStorageS3    bool // AWS S3 / compatible
+	HasSendGrid     bool // SendGrid email delivery
+	HasTelemetry    bool // Telemetry stack (Jaeger)
 }
 
 // aiCompanionSelection tracks which AI coding assistant to bootstrap.
@@ -113,7 +114,7 @@ func defaultAICompanion() aiCompanionSelection {
 func defaultInfrastructure() infrastructureSelection {
 	return infrastructureSelection{
 		HasRedis:        true,
-		HasRedisStreams:  true,
+		HasRedisStreams: true,
 		HasStorageDisk:  true,
 		HasStorageGCS:   true,
 		HasSendGrid:     true,
@@ -661,7 +662,7 @@ func scaffoldProject(opts initOpts) (string, error) {
 				HasTenancy:        opts.features.Tenancy,
 				HasOutbox:         opts.features.EventOutbox,
 				HasRedis:          opts.infra.HasRedis,
-				HasRedisStreams:    opts.infra.HasRedisStreams,
+				HasRedisStreams:   opts.infra.HasRedisStreams,
 				HasStorageDisk:    opts.infra.HasStorageDisk,
 				HasStorageGCS:     opts.infra.HasStorageGCS,
 				HasStorageS3:      opts.infra.HasStorageS3,

@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"github.com/gopernicus/gopernicus-cli/internal/cli"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,7 +13,7 @@ import (
 	"github.com/gopernicus/gopernicus-cli/internal/scaffold"
 )
 
-var bootCmd = &Command{
+var bootCmd = &cli.Command{
 	Name:  "boot",
 	Short: "Bootstrap project components from reflected schema",
 	Long: `Bootstrap project components for one or all domains.
@@ -24,7 +25,7 @@ scaffolds the corresponding files. Existing files are never overwritten.`,
 }
 
 func init() {
-	bootCmd.SubCommands = []*Command{
+	bootCmd.SubCommands = []*cli.Command{
 		{
 			Name:  "repos",
 			Short: "Bootstrap repos for a domain (or all domains)",
@@ -43,11 +44,11 @@ Examples:
 		},
 	}
 	bootCmd.Run = runBoot
-	RegisterCommand(bootCmd)
+	cli.RegisterCommand(bootCmd)
 }
 
 func runBoot(_ context.Context, args []string) error {
-	return dispatchSub(bootCmd, args)
+	return cli.DispatchSub(bootCmd, args)
 }
 
 func runBootRepos(_ context.Context, args []string) error {

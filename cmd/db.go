@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"github.com/gopernicus/gopernicus-cli/internal/cli"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +18,7 @@ import (
 	"github.com/gopernicus/gopernicus-cli/internal/schema"
 )
 
-var dbCmd = &Command{
+var dbCmd = &cli.Command{
 	Name:  "db",
 	Short: "Database utilities (migrate, reflect, status)",
 	Long:  "Database utilities for managing migrations and schema reflection.",
@@ -25,7 +26,7 @@ var dbCmd = &Command{
 }
 
 func init() {
-	dbCmd.SubCommands = []*Command{
+	dbCmd.SubCommands = []*cli.Command{
 		{
 			Name:  "migrate",
 			Short: "Run pending migrations",
@@ -78,11 +79,11 @@ Override the env file path in gopernicus.yml:
 		},
 	}
 	dbCmd.Run = runDB
-	RegisterCommand(dbCmd)
+	cli.RegisterCommand(dbCmd)
 }
 
 func runDB(_ context.Context, args []string) error {
-	return dispatchSub(dbCmd, args)
+	return cli.DispatchSub(dbCmd, args)
 }
 
 func runDBMigrate(ctx context.Context, args []string) error {

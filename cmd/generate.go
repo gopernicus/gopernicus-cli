@@ -3,12 +3,13 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"github.com/gopernicus/gopernicus-cli/internal/cli"
 
 	"github.com/gopernicus/gopernicus-cli/internal/generators"
 )
 
 func init() {
-	RegisterCommand(&Command{
+	cli.RegisterCommand(&cli.Command{
 		Name:  "generate",
 		Short: "Run code generators from queries.sql files",
 		Long: `Run code generators from queries.sql files.

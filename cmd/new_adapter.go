@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"github.com/gopernicus/gopernicus-cli/internal/cli"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +16,7 @@ import (
 const frameworkModule = generators.FrameworkModulePath
 
 func init() {
-	newCmd.SubCommands = append(newCmd.SubCommands, &Command{
+	newCmd.SubCommands = append(newCmd.SubCommands, &cli.Command{
 		Name:  "adapter",
 		Short: "Scaffold a custom adapter for a framework interface",
 		Usage: "gopernicus new adapter <type> <name>",
@@ -56,20 +57,20 @@ func runNewAdapter(_ context.Context, args []string) error {
 	}
 
 	data := templateData{
-		PkgName:       adapterName,
-		StructName:    spec.StructName,
-		ReceiverVar:   spec.ReceiverVar,
-		FrameworkMod:  frameworkModule,
-		InterfacePkg:  spec.InterfacePkg,
-		InterfaceRef:  spec.InterfaceRef,
-		SourceImports: spec.SourceImports,
-		MethodStubs:   spec.MethodStubs,
-		CompliancePkg: spec.CompliancePkg,
+		PkgName:        adapterName,
+		StructName:     spec.StructName,
+		ReceiverVar:    spec.ReceiverVar,
+		FrameworkMod:   frameworkModule,
+		InterfacePkg:   spec.InterfacePkg,
+		InterfaceRef:   spec.InterfaceRef,
+		SourceImports:  spec.SourceImports,
+		MethodStubs:    spec.MethodStubs,
+		CompliancePkg:  spec.CompliancePkg,
 		ComplianceCall: strings.ReplaceAll(spec.ComplianceCall, "{{var}}", spec.ReceiverVar),
-		DeferClose:    strings.ReplaceAll(spec.DeferClose, "{{var}}", spec.ReceiverVar),
-		TestImports:   spec.TestImports,
-		UserModule:    modulePath,
-		AdapterDir:    spec.AdapterDir,
+		DeferClose:     strings.ReplaceAll(spec.DeferClose, "{{var}}", spec.ReceiverVar),
+		TestImports:    spec.TestImports,
+		UserModule:     modulePath,
+		AdapterDir:     spec.AdapterDir,
 	}
 
 	// Write source file.
@@ -192,15 +193,15 @@ func TestCompliance(t *testing.T) {
 
 var adapterSpecs = map[string]adapterSpec{
 	"cache": {
-		InterfacePkg:  "infrastructure/cache",
-		InterfaceRef:  "cache.Cacher",
-		StructName:    "Store",
-		ReceiverVar:   "s",
-		CompliancePkg: "infrastructure/cache/cachetest",
+		InterfacePkg:   "infrastructure/cache",
+		InterfaceRef:   "cache.Cacher",
+		StructName:     "Store",
+		ReceiverVar:    "s",
+		CompliancePkg:  "infrastructure/cache/cachetest",
 		ComplianceCall: "cachetest.RunSuite(t, {{var}})",
-		DeferClose:    "{{var}}.Close()",
-		AdapterDir:    "infrastructure/cache",
-		SourceImports: []string{"context", "time"},
+		DeferClose:     "{{var}}.Close()",
+		AdapterDir:     "infrastructure/cache",
+		SourceImports:  []string{"context", "time"},
 		MethodStubs: `func (s *Store) Get(ctx context.Context, key string) ([]byte, bool, error) {
 	// TODO: implement
 	return nil, false, nil
@@ -233,16 +234,16 @@ func (s *Store) Close() error {
 	},
 
 	"events": {
-		InterfacePkg:  "infrastructure/events",
-		InterfaceRef:  "events.Bus",
-		StructName:    "Bus",
-		ReceiverVar:   "b",
-		CompliancePkg: "infrastructure/events/eventstest",
+		InterfacePkg:   "infrastructure/events",
+		InterfaceRef:   "events.Bus",
+		StructName:     "Bus",
+		ReceiverVar:    "b",
+		CompliancePkg:  "infrastructure/events/eventstest",
 		ComplianceCall: "eventstest.RunSuite(t, {{var}})",
-		DeferClose:    "{{var}}.Close(context.Background())",
-		AdapterDir:    "infrastructure/events",
-		SourceImports: []string{"context"},
-		TestImports:   []string{"context"},
+		DeferClose:     "{{var}}.Close(context.Background())",
+		AdapterDir:     "infrastructure/events",
+		SourceImports:  []string{"context"},
+		TestImports:    []string{"context"},
 		MethodStubs: `func (b *Bus) Emit(ctx context.Context, event events.Event, opts ...events.EmitOption) error {
 	// TODO: implement
 	return nil
@@ -260,15 +261,15 @@ func (b *Bus) Close(ctx context.Context) error {
 	},
 
 	"ratelimiter": {
-		InterfacePkg:  "infrastructure/ratelimiter",
-		InterfaceRef:  "ratelimiter.Storer",
-		StructName:    "Store",
-		ReceiverVar:   "s",
-		CompliancePkg: "infrastructure/ratelimiter/ratelimitertest",
+		InterfacePkg:   "infrastructure/ratelimiter",
+		InterfaceRef:   "ratelimiter.Storer",
+		StructName:     "Store",
+		ReceiverVar:    "s",
+		CompliancePkg:  "infrastructure/ratelimiter/ratelimitertest",
 		ComplianceCall: "ratelimitertest.RunSuite(t, {{var}})",
-		DeferClose:    "{{var}}.Close()",
-		AdapterDir:    "infrastructure/ratelimiter",
-		SourceImports: []string{"context"},
+		DeferClose:     "{{var}}.Close()",
+		AdapterDir:     "infrastructure/ratelimiter",
+		SourceImports:  []string{"context"},
 		MethodStubs: `func (s *Store) Allow(ctx context.Context, key string, limit ratelimiter.Limit) (ratelimiter.Result, error) {
 	// TODO: implement
 	return ratelimiter.Result{}, nil
@@ -286,13 +287,13 @@ func (s *Store) Close() error {
 	},
 
 	"hasher": {
-		InterfacePkg:  "infrastructure/cryptids",
-		InterfaceRef:  "cryptids.PasswordHasher",
-		StructName:    "Hasher",
-		ReceiverVar:   "h",
-		CompliancePkg: "infrastructure/cryptids/cryptidstest",
+		InterfacePkg:   "infrastructure/cryptids",
+		InterfaceRef:   "cryptids.PasswordHasher",
+		StructName:     "Hasher",
+		ReceiverVar:    "h",
+		CompliancePkg:  "infrastructure/cryptids/cryptidstest",
 		ComplianceCall: "cryptidstest.RunHasherSuite(t, {{var}})",
-		AdapterDir:    "infrastructure/cryptids",
+		AdapterDir:     "infrastructure/cryptids",
 		MethodStubs: `func (h *Hasher) Hash(password string) (string, error) {
 	// TODO: implement
 	return "", nil
@@ -305,14 +306,14 @@ func (h *Hasher) Compare(hash, password string) error {
 	},
 
 	"token": {
-		InterfacePkg:  "infrastructure/cryptids",
-		InterfaceRef:  "cryptids.TokenSigner",
-		StructName:    "Signer",
-		ReceiverVar:   "s",
-		CompliancePkg: "infrastructure/cryptids/cryptidstest",
+		InterfacePkg:   "infrastructure/cryptids",
+		InterfaceRef:   "cryptids.TokenSigner",
+		StructName:     "Signer",
+		ReceiverVar:    "s",
+		CompliancePkg:  "infrastructure/cryptids/cryptidstest",
 		ComplianceCall: "cryptidstest.RunSignerSuite(t, {{var}})",
-		AdapterDir:    "infrastructure/cryptids",
-		SourceImports: []string{"time"},
+		AdapterDir:     "infrastructure/cryptids",
+		SourceImports:  []string{"time"},
 		MethodStubs: `func (s *Signer) Sign(claims map[string]any, expiresAt time.Time) (string, error) {
 	// TODO: implement
 	return "", nil
@@ -325,14 +326,14 @@ func (s *Signer) Verify(token string) (map[string]any, error) {
 	},
 
 	"storage": {
-		InterfacePkg:  "infrastructure/storage",
-		InterfaceRef:  "storage.Client",
-		StructName:    "Client",
-		ReceiverVar:   "c",
-		CompliancePkg: "infrastructure/storage/storagetest",
+		InterfacePkg:   "infrastructure/storage",
+		InterfaceRef:   "storage.Client",
+		StructName:     "Client",
+		ReceiverVar:    "c",
+		CompliancePkg:  "infrastructure/storage/storagetest",
 		ComplianceCall: "storagetest.RunSuite(t, {{var}})",
-		AdapterDir:    "infrastructure/storage",
-		SourceImports: []string{"context", "io", "time"},
+		AdapterDir:     "infrastructure/storage",
+		SourceImports:  []string{"context", "io", "time"},
 		MethodStubs: `func (c *Client) Upload(ctx context.Context, path string, reader io.Reader) error {
 	// TODO: implement
 	return nil
@@ -382,14 +383,14 @@ func (c *Client) SignedURL(ctx context.Context, path string, expiry time.Duratio
 	},
 
 	"emailer": {
-		InterfacePkg:  "infrastructure/communications/emailer",
-		InterfaceRef:  "emailer.Client",
-		StructName:    "Client",
-		ReceiverVar:   "c",
-		CompliancePkg: "infrastructure/communications/emailer/emailertest",
+		InterfacePkg:   "infrastructure/communications/emailer",
+		InterfaceRef:   "emailer.Client",
+		StructName:     "Client",
+		ReceiverVar:    "c",
+		CompliancePkg:  "infrastructure/communications/emailer/emailertest",
 		ComplianceCall: "emailertest.RunSuite(t, {{var}})",
-		AdapterDir:    "infrastructure/communications/emailer",
-		SourceImports: []string{"context"},
+		AdapterDir:     "infrastructure/communications/emailer",
+		SourceImports:  []string{"context"},
 		MethodStubs: `func (c *Client) Send(ctx context.Context, email emailer.Email) error {
 	// TODO: implement
 	return nil

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/gopernicus/gopernicus-cli/internal/cli"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +17,7 @@ import (
 )
 
 func init() {
-	RegisterCommand(&Command{
+	cli.RegisterCommand(&cli.Command{
 		Name:  "doctor",
 		Short: "Check project health and configuration",
 		Long: `Check that your project is correctly configured for gopernicus.

@@ -3,10 +3,11 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"github.com/gopernicus/gopernicus-cli/internal/cli"
 )
 
 func init() {
-	RegisterCommand(&Command{
+	cli.RegisterCommand(&cli.Command{
 		Name:  "version",
 		Short: "Show gopernicus CLI version",
 		Long:  "Show the gopernicus CLI version and build information.",
@@ -16,6 +17,6 @@ func init() {
 }
 
 func runVersion(_ context.Context, _ []string) error {
-	fmt.Printf("gopernicus %s\n", Version)
+	fmt.Printf("gopernicus %s\n", cli.Version)
 	return nil
 }

@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"github.com/gopernicus/gopernicus-cli/internal/cli"
 	"os"
 	"strings"
 
@@ -11,7 +12,7 @@ import (
 	"github.com/gopernicus/gopernicus-cli/internal/scaffold"
 )
 
-var newCmd = &Command{
+var newCmd = &cli.Command{
 	Name:  "new",
 	Short: "Scaffold new project components",
 	Long:  "Scaffold new project components (repositories, etc.).",
@@ -19,7 +20,7 @@ var newCmd = &Command{
 }
 
 func init() {
-	newCmd.SubCommands = []*Command{
+	newCmd.SubCommands = []*cli.Command{
 		{
 			Name:  "repo",
 			Short: "Scaffold a new repository from reflected schema",
@@ -59,11 +60,11 @@ Examples:
 		},
 	}
 	newCmd.Run = runNew
-	RegisterCommand(newCmd)
+	cli.RegisterCommand(newCmd)
 }
 
 func runNew(_ context.Context, args []string) error {
-	return dispatchSub(newCmd, args)
+	return cli.DispatchSub(newCmd, args)
 }
 
 func runNewRepo(_ context.Context, args []string) error {
