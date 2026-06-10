@@ -201,7 +201,7 @@ func runInit(_ context.Context, args []string) error {
 	}
 
 	// Generate the feature repositories' code, tests, fixtures, and feature
-	// satisfiers from the copied queries.sql + reflected schema, so the
+	// satisfiers from the framework-shipped specs + reflected schema, so the
 	// project is complete out of the box. Best-effort: a failure here leaves
 	// a valid scaffold the user can regenerate manually, so it must not fail
 	// init.
@@ -784,8 +784,8 @@ func applyFeatureSelection(m *manifest.Manifest, features featureSelection) {
 }
 
 // runInitGenerate runs code generation over a freshly-scaffolded project,
-// using the copied queries.sql + reflected schema. Kept quiet (no verbose
-// per-file output) so it reads as a single init step.
+// using the framework-shipped feature specs + reflected schema. Kept quiet
+// (no verbose per-file output) so it reads as a single init step.
 // runInitGenerate runs the project's pinned generator so even init-time
 // generation matches the framework version the project just pinned — the
 // CLI's own build is never the generator.
@@ -869,11 +869,15 @@ func copyFeatureAssets(target, modulePath, projectName, fwVersion string, featur
 			continue
 		}
 
-		// Copy core/repositories/{domain}/
+		// Copy core/repositories/{domain}/ — except queries.sql: feature
+		// entity specs are spec-shipped (version-locked with the framework
+		// and parsed by the generator directly). Creating a project-local
+		// queries.sql ejects an entity's shipped spec. usersstore is the
+		// framework's generator-v2 golden reference, not a project file.
 		fmt.Printf("  → copying %s core repositories\n", d.featureName)
 		coreSrc := filepath.Join(source, "core", "repositories", d.domain)
 		coreDst := filepath.Join(target, "core", "repositories", d.domain)
-		if err := copyDirRecursive(coreSrc, coreDst); err != nil {
+		if err := copyDirRecursiveSkip(coreSrc, coreDst, "queries.sql", "usersstore"); err != nil {
 			return fmt.Errorf("copying %s core repositories: %w", d.featureName, err)
 		}
 
@@ -962,9 +966,24 @@ func gopernicusSourceDir(version string) (string, error) {
 
 // copyDirRecursive copies all files and subdirectories from src to dst.
 func copyDirRecursive(src, dst string) error {
+	return copyDirRecursiveSkip(src, dst)
+}
+
+// copyDirRecursiveSkip copies all files and subdirectories from src to dst,
+// skipping files and directories whose base name is in skipNames.
+func copyDirRecursiveSkip(src, dst string, skipNames ...string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+
+		for _, skip := range skipNames {
+			if info.Name() == skip {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
 		}
 
 		rel, err := filepath.Rel(src, path)
