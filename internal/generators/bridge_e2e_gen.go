@@ -53,6 +53,14 @@ type BridgeE2EData struct {
 	// record_state value must not control the stored state (SEC1/P5).
 	HasRecordState bool
 
+	// Update-path mass-assignment probe (P5): a PUT setting a legit field
+	// plus a smuggled record_state must leave the stored state untouched.
+	// Requires record_state, an Update route, and a settable update field.
+	HasUpdate         bool
+	UpdatePathExpr    string // Go expr building the PUT path from `id`
+	UpdateLegitJSON   string // a non-server-set update field (json name)
+	UpdateLegitValue  string // a valid value literal for that field
+
 	// String filter params (plus "search") get the strict probe: a payload
 	// is a parameterized match value, so a 200 must return zero rows.
 	// Non-string filter params join order/limit/cursor in the never-500
@@ -197,6 +205,24 @@ func buildBridgeE2EData(data BridgeTemplateData, resolved *ResolvedFile, moduleP
 			if expr, ok := pkOnlyPathExpr(r.Path, pkParam); ok {
 				e2e.HasDelete = true
 				e2e.DeletePathExpr = expr
+			}
+		case "Update":
+			if expr, ok := pkOnlyPathExpr(r.Path, pkParam); ok {
+				e2e.HasUpdate = true
+				e2e.UpdatePathExpr = expr
+			}
+		}
+	}
+
+	// Pick a settable, non-server-set string update field for the update
+	// mass-assignment probe (SEC1 already strips record_state/ownership from
+	// the update model, so any remaining string field is a safe legit edit).
+	if e2e.HasRecordState && e2e.HasUpdate && len(data.UpdateQueries) > 0 {
+		for _, f := range data.UpdateQueries[0].Fields {
+			if f.IsString && !f.IsEnum {
+				e2e.UpdateLegitJSON = f.DBName
+				e2e.UpdateLegitValue = `"edited-value"`
+				break
 			}
 		}
 	}

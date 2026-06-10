@@ -209,6 +209,27 @@ func TestE2E{{.EntityName}}MassAssignment(t *testing.T) {
 	resp.RequireStatus(t, 201)
 	assert.NotEqual(t, "zzz-forged-state", resp.String(t, "record.record_state"))
 }
+{{end}}{{if and .UpdateLegitJSON .HasGet}}
+func TestE2E{{.EntityName}}UpdateMassAssignment(t *testing.T) {
+	client, db := setupE2EServer(t)
+
+	resp := client.Post(t, "{{.CreatePath}}", seededCreate{{.EntityName}}Request(t, db))
+	resp.RequireStatus(t, 201)
+	id := resp.String(t, "record.{{.PKJSON}}")
+	require.NotEmpty(t, id)
+
+	// A PUT that edits a legit field while smuggling record_state must not
+	// move the stored state — record_state is excluded from the update model
+	// (SEC1), so the lifecycle routes remain the only way to transition it.
+	client.Put(t, {{.UpdatePathExpr}}, map[string]any{
+		"{{.UpdateLegitJSON}}": {{.UpdateLegitValue}},
+		"record_state":         "zzz-forged-state",
+	}).RequireStatus(t, 200)
+
+	got := client.Get(t, {{.GetPathExpr}})
+	got.RequireStatus(t, 200)
+	assert.NotEqual(t, "zzz-forged-state", got.String(t, "record.record_state"))
+}
 {{end}}
 `
 
