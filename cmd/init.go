@@ -171,6 +171,24 @@ func runInit(_ context.Context, args []string) error {
 		if err := runInitGenerate(target); err != nil {
 			fmt.Printf("  warning: generation skipped (%v)\n", err)
 			fmt.Printf("           run 'gopernicus generate' after 'db reflect' to populate tests/fixtures\n")
+		} else {
+			// Verify the generated code compiles against the resolved
+			// framework version. The most common failure is a version skew:
+			// the generator (this CLI) is newer than the pinned framework
+			// release and emits APIs it doesn't have yet.
+			verify := exec.Command("go", "build", "./...")
+			verify.Dir = target
+			if out, err := verify.CombinedOutput(); err != nil {
+				fmt.Printf("  warning: generated code does not compile against the resolved gopernicus version:\n")
+				for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+					fmt.Printf("    %s\n", line)
+				}
+				if os.Getenv("GOPERNICUS_DEV_SOURCE") == "" {
+					fmt.Printf("  → this CLI may be newer than the pinned framework release. To build against a\n")
+					fmt.Printf("    local checkout, set GOPERNICUS_DEV_SOURCE=/path/to/gopernicus and re-init, or add a\n")
+					fmt.Printf("    replace directive: go mod edit -replace github.com/gopernicus/gopernicus=/path/to/gopernicus\n")
+				}
+			}
 		}
 	}
 

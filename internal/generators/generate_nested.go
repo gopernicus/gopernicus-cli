@@ -146,7 +146,7 @@ func runNested(cfg Config, schemas map[string]*schema.ReflectedSchema, modulePat
 		}
 
 		repoDir := filepath.Join(repoRoot, b.Domain, b.PkgName)
-		resolved, err := resolveNestedBinding(b, repoDir, schemas, true)
+		resolved, err := resolveNestedBinding(b, repoDir, schemas, true, opts.Verbose)
 		if err != nil {
 			return err
 		}
@@ -297,7 +297,7 @@ func runNested(cfg Config, schemas map[string]*schema.ReflectedSchema, modulePat
 				continue
 			}
 			repoDir := filepath.Join(repoRoot, b.Domain, b.PkgName)
-			resolved, err := resolveNestedBinding(b, repoDir, schemas, false)
+			resolved, err := resolveNestedBinding(b, repoDir, schemas, false, opts.Verbose)
 			if err != nil || resolved == nil {
 				continue // out-of-scope entities are best-effort for fixtures
 			}
@@ -341,6 +341,7 @@ func resolveNestedBinding(
 	repoDir string,
 	schemas map[string]*schema.ReflectedSchema,
 	report bool,
+	verbose bool,
 ) (*ResolvedFile, error) {
 	qfPath := filepath.Join(repoDir, "queries.sql")
 	if !fileExists(qfPath) {
@@ -358,8 +359,8 @@ func resolveNestedBinding(
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", qfPath, err)
 	}
-	if report && qf.DatabaseExplicit {
-		fmt.Printf("  warning: %s: '-- @database: %s' is ignored — databases.<name>.domains in gopernicus.yml is the binding source\n",
+	if report && verbose && qf.DatabaseExplicit {
+		fmt.Printf("  note: %s: '-- @database: %s' is ignored (databases.<name>.domains is the binding source)\n",
 			qfPath, qf.Database)
 	}
 
