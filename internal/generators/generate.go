@@ -362,7 +362,7 @@ func generateFromQueryFile(
 		fmt.Printf("      note: integration test generation is pgx-only — skipped in spec store mode\n")
 
 	default: // manifest.StoreModePgx
-		if err := generatePgxStoreAndTests(resolved, domainName, modulePath, projectRoot, opts); err != nil {
+		if err := generatePgxStoreAndTests(resolved, domainName, modulePath, projectRoot, qf.Database, opts); err != nil {
 			return nil, "", err
 		}
 	}
@@ -387,8 +387,9 @@ func generateFromQueryFile(
 // generatePgxStoreAndTests generates the pgx store plus its integration
 // tests, unless the entity opted out via `-- @skip-integration-test` in
 // queries.sql. When skipped, any previously generated test file is removed so
-// a stale copy doesn't linger and keep failing.
-func generatePgxStoreAndTests(resolved *ResolvedFile, domainName, modulePath, projectRoot string, opts Options) error {
+// a stale copy doesn't linger and keep failing. dbName is the manifest
+// database hosting the store (locates migrations for the test bootstrap).
+func generatePgxStoreAndTests(resolved *ResolvedFile, domainName, modulePath, projectRoot, dbName string, opts Options) error {
 	if err := GeneratePgxStore(resolved, domainName, modulePath, projectRoot, opts); err != nil {
 		return fmt.Errorf("pgxstore: %w", err)
 	}
@@ -407,7 +408,7 @@ func generatePgxStoreAndTests(resolved *ResolvedFile, domainName, modulePath, pr
 		return nil
 	}
 
-	testData, err := BuildIntegrationTestData(resolved, modulePath)
+	testData, err := BuildIntegrationTestData(resolved, modulePath, dbName)
 	if err != nil {
 		return fmt.Errorf("integration test data: %w", err)
 	}

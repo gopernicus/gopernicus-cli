@@ -57,6 +57,10 @@ type IntegrationTestData struct {
 	PKGoName string // e.g. "UserID"
 	PKGoType string // e.g. "string"
 
+	// MigrationsDir is the project-root-relative migrations directory for
+	// the database hosting this store, e.g. "workshop/migrations/primary".
+	MigrationsDir string
+
 	// Methods to test
 	Methods []IntegrationTestMethod
 
@@ -85,8 +89,10 @@ type IntegrationTestData struct {
 	HardDeleteExtraCallArgs []string
 }
 
-// BuildIntegrationTestData creates test data from a resolved file.
-func BuildIntegrationTestData(resolved *ResolvedFile, modulePath string) (IntegrationTestData, error) {
+// BuildIntegrationTestData creates test data from a resolved file. dbName is
+// the manifest database hosting this store — it locates the migrations dir
+// the bootstrapped migrateTestDB applies.
+func BuildIntegrationTestData(resolved *ResolvedFile, modulePath, dbName string) (IntegrationTestData, error) {
 	data := IntegrationTestData{
 		FrameworkPath: gopernicusFrameworkPath,
 		StorePkg:      resolved.StorePkg,
@@ -98,6 +104,7 @@ func BuildIntegrationTestData(resolved *ResolvedFile, modulePath string) (Integr
 		PKColumn:      resolved.PKColumn,
 		PKGoName:      resolved.PKGoName,
 		PKGoType:      resolved.PKGoType,
+		MigrationsDir: "workshop/migrations/" + dbName,
 		DomainName:    resolved.DomainName,
 	}
 

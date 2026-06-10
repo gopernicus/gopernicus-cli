@@ -175,25 +175,36 @@ package {{.StorePkg}}
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"runtime"
 
 	"{{.FrameworkPath}}/infrastructure/database/postgres/pgxdb"
 	"{{.FrameworkPath}}/workshop/testing/testpgx"
 )
 
-// migrateTestDB runs migrations for the test database.
-// TODO: Update this to use your project's migration embed.
-//
-// Example with embedded migrations:
-//
-//	//go:embed ../../../../workshop/migrations/primary/*.sql
-//	var testMigrations embed.FS
-//
-//	func migrateTestDB(ctx context.Context, pool *pgxdb.Pool) error {
-//		return pgxdb.RunMigrations(ctx, pool, testMigrations, "workshop/migrations/primary")
-//	}
-func migrateTestDB(_ context.Context, _ *pgxdb.Pool) error {
-	// Replace with actual migration logic.
-	return nil
+// migrateTestDB applies this project's migrations to the test database, so
+// tests run against the same schema as 'gopernicus db migrate'. Replace it
+// if this store's tests need a different schema setup.
+func migrateTestDB(ctx context.Context, pool *pgxdb.Pool) error {
+	return pgxdb.RunMigrations(ctx, pool, os.DirFS(projectRoot()), "{{.MigrationsDir}}")
+}
+
+// projectRoot walks up from this source file to the directory containing
+// go.mod, so the migrations path resolves at any test working directory.
+func projectRoot() string {
+	_, file, _, _ := runtime.Caller(0)
+	dir := filepath.Dir(file)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "."
+		}
+		dir = parent
+	}
 }
 
 // testPGXOptions provides extra options to testpgx.SetupTestPGX in the

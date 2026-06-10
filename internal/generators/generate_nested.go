@@ -190,7 +190,7 @@ func runNested(cfg Config, schemas map[string]*schema.ReflectedSchema, modulePat
 				}
 				fmt.Printf("      note: integration test generation is pgx-only — skipped in spec store mode\n")
 			default: // manifest.StoreModePgx
-				if err := generatePgxStoreAndTests(resolved, b.Domain, modulePath, cfg.ProjectRoot, opts); err != nil {
+				if err := generatePgxStoreAndTests(resolved, b.Domain, modulePath, cfg.ProjectRoot, db, opts); err != nil {
 					return fmt.Errorf("%s/%s: %w", b.Domain, b.PkgName, err)
 				}
 			}
