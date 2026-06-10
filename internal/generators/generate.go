@@ -384,10 +384,9 @@ func generateFromQueryFile(
 		if err := GenerateSpecStore(resolved, repoDir, modulePath, opts); err != nil {
 			return nil, "", fmt.Errorf("specstore: %w", err)
 		}
-
-		// Integration test generation is pgx-coupled (testcontainers + pgx
-		// fixtures) and has no spec-mode equivalent yet.
-		fmt.Printf("      note: integration test generation is pgx-only — skipped in spec store mode\n")
+		if err := generateSpecStoreTests(resolved, domainName, modulePath, projectRoot, qf.Database, opts); err != nil {
+			return nil, "", err
+		}
 
 	default: // manifest.StoreModePgx
 		if err := generatePgxStoreAndTests(resolved, domainName, modulePath, projectRoot, qf.Database, opts); err != nil {
@@ -442,6 +441,36 @@ func generatePgxStoreAndTests(resolved *ResolvedFile, domainName, modulePath, pr
 	}
 	if err := GenerateIntegrationTest(testData, storeDir, opts); err != nil {
 		return fmt.Errorf("integration tests: %w", err)
+	}
+	return nil
+}
+
+// generateSpecStoreTests generates the spec store's integration tests
+// (testsqlite + sqlitefixtures), honoring `-- @skip-integration-test` the
+// same way the pgx path does.
+func generateSpecStoreTests(resolved *ResolvedFile, domainName, modulePath, projectRoot, dbName string, opts Options) error {
+	storeDir := StoreDir(domainName, resolved.TableName, specStorePackageSuffix, projectRoot)
+	if resolved.SkipIntegrationTest {
+		stalePath := filepath.Join(storeDir, "generated_test.go")
+		if fileExists(stalePath) && !opts.DryRun {
+			if err := os.Remove(stalePath); err != nil {
+				return fmt.Errorf("remove stale generated_test.go: %w", err)
+			}
+			if opts.Verbose {
+				fmt.Printf("      removed %s (skip-integration-test)\n", stalePath)
+			}
+		}
+		return nil
+	}
+
+	testData, err := BuildIntegrationTestData(resolved, modulePath, dbName)
+	if err != nil {
+		return fmt.Errorf("spec integration test data: %w", err)
+	}
+	testData.StorePkg = StorePackage(resolved.TableName, specStorePackageSuffix)
+	testData.FixtureImport = modulePath + "/workshop/testing/sqlitefixtures"
+	if err := GenerateSpecIntegrationTest(testData, storeDir, opts); err != nil {
+		return fmt.Errorf("spec integration tests: %w", err)
 	}
 	return nil
 }

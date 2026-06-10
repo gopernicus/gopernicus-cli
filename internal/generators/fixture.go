@@ -454,7 +454,27 @@ func GenerateFixtures(data FixtureTemplateData, fixtureDir string, opts Options)
 // GenerateSpecFixtures produces the sqlite-flavored fixtures package for
 // spec-store entities: testsqlite handle, ? placeholders, datetime('now').
 func GenerateSpecFixtures(data FixtureTemplateData, fixtureDir string, opts Options) error {
+	specEncodeTimeDefaults(data.Entities)
 	return generateFixturesWith(data, fixtureDir, specFixtureGeneratedTemplate, specFixtureBootstrapTemplate, opts)
+}
+
+// specEncodeTimeDefaults rewrites time-typed insert defaults to go through
+// the dialect's TimeArg encoding. Binding a raw time.Time stores Go's
+// String() rendering in TEXT columns, which crud's scanner rejects; the
+// stores themselves encode via timeAware, fixtures must match. InsertFields
+// is deep-copied first — multi-homed entities share backing arrays with the
+// pgx fixture list.
+func specEncodeTimeDefaults(entities []FixtureEntity) {
+	for i := range entities {
+		fields := make([]FixtureField, len(entities[i].InsertFields))
+		copy(fields, entities[i].InsertFields)
+		for j, f := range fields {
+			if strings.Contains(f.TestDefault, "time.Now()") {
+				fields[j].TestDefault = "db.Dialect().TimeArg(time.Now().UTC())"
+			}
+		}
+		entities[i].InsertFields = fields
+	}
 }
 
 func generateFixturesWith(data FixtureTemplateData, fixtureDir, generatedTmpl, bootstrapTmpl string, opts Options) error {

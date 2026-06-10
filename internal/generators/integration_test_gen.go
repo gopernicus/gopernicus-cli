@@ -200,6 +200,18 @@ func BuildIntegrationTestData(resolved *ResolvedFile, modulePath, dbName string)
 
 // GenerateIntegrationTest produces the generated_test.go file for a pgxstore package.
 func GenerateIntegrationTest(data IntegrationTestData, storeDir string, opts Options) error {
+	return generateIntegrationTestWith(data, storeDir,
+		integrationTestGeneratedTemplate, integrationTestBootstrapTemplate, opts)
+}
+
+// GenerateSpecIntegrationTest produces the spec-store variant: testsqlite
+// harness, sqlitefixtures, NewStore(q, d, inTx).
+func GenerateSpecIntegrationTest(data IntegrationTestData, storeDir string, opts Options) error {
+	return generateIntegrationTestWith(data, storeDir,
+		specIntegrationTestGeneratedTemplate, specIntegrationTestBootstrapTemplate, opts)
+}
+
+func generateIntegrationTestWith(data IntegrationTestData, storeDir, generatedTmpl, bootstrapTmpl string, opts Options) error {
 	type genFile struct {
 		name      string
 		tmpl      string
@@ -207,8 +219,8 @@ func GenerateIntegrationTest(data IntegrationTestData, storeDir string, opts Opt
 	}
 
 	genFiles := []genFile{
-		{"generated_test.go", integrationTestGeneratedTemplate, false},
-		{"store_test.go", integrationTestBootstrapTemplate, true},
+		{"generated_test.go", generatedTmpl, false},
+		{"store_test.go", bootstrapTmpl, true},
 	}
 
 	for _, f := range genFiles {

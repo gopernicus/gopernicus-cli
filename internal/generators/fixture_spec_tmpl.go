@@ -16,6 +16,7 @@ import (
 {{- end}}
 
 	"{{.FrameworkPath}}/infrastructure/cryptids"
+	"{{.FrameworkPath}}/infrastructure/database/crud"
 	"{{.FrameworkPath}}/workshop/testing/testsqlite"
 	"{{.FrameworkPath}}/sdk/conversion"
 	"github.com/stretchr/testify/require"
@@ -69,18 +70,16 @@ func CreateTest{{$e.EntityName}}(t *testing.T, ctx context.Context, db *testsqli
 	)
 	require.NoError(t, err, "failed to insert {{$e.EntityName}}")
 
-	// Retrieve the created record.
-	var entity {{$e.RepoPkg}}.{{$e.EntityName}}
-	err = db.DB.QueryRow(ctx, ` + "`" + `
+	// Retrieve the created record through the dialect-aware scanner —
+	// sqlite TEXT timestamps must convert into time.Time entity fields.
+	rows, err := db.Querier().Query(ctx, ` + "`" + `
 		SELECT {{selectCols $e.AllColumns}}
 		FROM {{$e.TableName}}
 		WHERE {{$e.PKColumn}} = ?
-	` + "`" + `, {{camel $e.PKColumn}}).Scan(
-		{{- range $e.AllColumns}}
-		&entity.{{.GoName}},
-		{{- end}}
-	)
-	require.NoError(t, err, "failed to retrieve created {{$e.EntityName}}")
+	` + "`" + `, {{camel $e.PKColumn}})
+	require.NoError(t, err, "failed to query created {{$e.EntityName}}")
+	entity, err := crud.ScanOne[{{$e.RepoPkg}}.{{$e.EntityName}}](rows, db.Dialect())
+	require.NoError(t, err, "failed to scan created {{$e.EntityName}}")
 
 	return entity
 }

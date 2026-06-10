@@ -71,9 +71,14 @@ func TestGenerateDispatch_SpecMode(t *testing.T) {
 	if _, err := os.Stat(pgxDir); !os.IsNotExist(err) {
 		t.Errorf("pgx store dir %s must not exist in spec mode", pgxDir)
 	}
-	testFile := filepath.Join(repoDir, "usersstore", "generated_test.go")
-	if _, err := os.Stat(testFile); !os.IsNotExist(err) {
-		t.Errorf("integration tests must be skipped in spec mode, found %s", testFile)
+	// Spec mode generates its own integration tests (testsqlite-backed).
+	for _, want := range []string{
+		filepath.Join(repoDir, "usersstore", "generated_test.go"),
+		filepath.Join(repoDir, "usersstore", "store_test.go"),
+	} {
+		if _, err := os.Stat(want); err != nil {
+			t.Errorf("expected spec integration test file %s: %v", want, err)
+		}
 	}
 }
 
