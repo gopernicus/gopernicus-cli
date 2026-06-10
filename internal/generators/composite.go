@@ -17,7 +17,6 @@ type CompositeEntity struct {
 	RepoPkg    string // repo package name, e.g. "users", "apikeys"
 	StorePkg   string // store package name, e.g. "userspgx", "usersstore"
 	EntityName string // same as FieldName (for template clarity)
-	HasEvents  bool   // true if any query has @event annotation
 
 	// CacheKeyPrefix qualifies the entity's cache keys with the hosting
 	// database (e.g. "primary:events:event_outbox"). Set only for entities
@@ -33,7 +32,6 @@ type CompositeTemplateData struct {
 	FrameworkPath string            // gopernicus framework module path (for auth, infra imports)
 	DomainPath    string            // import path segment, e.g. "core/repositories/auth"
 	Entities      []CompositeEntity // sorted by FieldName
-	HasEvents     bool              // true if any entity in this domain has events
 	HasAuth       bool              // true if domain has authorization schema (@auth.relation/@auth.permission annotations)
 	SpecMode      bool              // true when the hosting database uses the spec store mode
 

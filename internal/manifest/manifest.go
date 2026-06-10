@@ -357,11 +357,6 @@ func Save(root string, m *Manifest) error {
 	return nil
 }
 
-// New returns a new manifest with sensible defaults.
-func New() *Manifest {
-	return NewWithProject("")
-}
-
 // NewWithProject returns a new manifest with the database URL env var
 // namespaced to the project. e.g., "myapp" → "MYAPP_DB_DATABASE_URL".
 // This matches the env tag on pgxdb.Options (env:"DB_DATABASE_URL").
@@ -389,19 +384,6 @@ func NewWithProject(projectName string) *Manifest {
 			Tenancy:        FeatureGopernicus,
 		},
 	}
-}
-
-// DomainForTable returns the domain name for a table within a database config.
-// Returns "" if the table is not mapped to any domain.
-func (d *DatabaseConfig) DomainForTable(tableName string) string {
-	for domain, tables := range d.Domains {
-		for _, t := range tables {
-			if t == tableName {
-				return domain
-			}
-		}
-	}
-	return ""
 }
 
 // MigrationsDir returns the migrations directory for a named database,

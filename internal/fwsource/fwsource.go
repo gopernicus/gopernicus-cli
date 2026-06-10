@@ -105,18 +105,6 @@ func RepoFiles(sourceDir, domain, tableName string) map[string][]byte {
 	return result
 }
 
-// QueriesSQL returns just the queries.sql content for a framework table,
-// or (nil, false) if not found.
-func QueriesSQL(sourceDir, domain, tableName string) ([]byte, bool) {
-	entityPkg := toPackageName(tableName)
-	path := filepath.Join(sourceDir, "core", "repositories", domain, entityPkg, "queries.sql")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, false
-	}
-	return data, true
-}
-
 // walkCollect walks dir and adds all files to result with keys prefixed by prefix.
 // Generated files (generated_*.go) are excluded since those are produced by
 // `gopernicus generate` and should not be scaffolded.

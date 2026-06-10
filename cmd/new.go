@@ -498,7 +498,6 @@ type parentInfo struct {
 	Column   string // FK column name, e.g. "parent_question_id"
 	RefTable string // referenced table, e.g. "questions"
 	RelName  string // singularized ref table, e.g. "question"
-	IsTenant bool   // true if RefTable == "tenants"
 }
 
 // ancestry holds the detected tenant and parent relationships for an entity.
@@ -534,7 +533,6 @@ func detectAncestry(table *schema.TableInfo) ancestry {
 			Column:   "tenant_id",
 			RefTable: "tenants",
 			RelName:  "tenant",
-			IsTenant: true,
 		}
 	}
 
@@ -550,7 +548,6 @@ func detectAncestry(table *schema.TableInfo) ancestry {
 					Column:   col,
 					RefTable: "tenants",
 					RelName:  "tenant",
-					IsTenant: true,
 				}
 			}
 			continue

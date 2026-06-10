@@ -40,11 +40,6 @@ type BridgeTemplateData struct {
 	// Auth relationship creation — true when any Create route has @auth.create.
 	HasCreateRels bool
 
-	// Deprecated: per-route rels are now emitted via per-Route CreateRels in the
-	// generated.go template (one createAuthRelationships{FuncName} method per
-	// create route). Retained for backward compat with any downstream consumers.
-	AllCreateRels []BridgeCreateRel
-
 	// Auth relationship cleanup — true when any Delete/HardDelete route exists
 	// and auth is enabled. Injects deleteAuthRelationships into generated bridge.
 	HasDeleteRels bool

@@ -34,13 +34,6 @@ func (c *Config) Get(key string) string {
 	return os.Getenv(key)
 }
 
-// GetOrDefault returns the value or fallback if the variable is unset.
-func (c *Config) GetOrDefault(key, fallback string) string {
-	if v := c.Get(key); v != "" {
-		return v
-	}
-	return fallback
-}
 
 // Require returns the value or an error if the variable is unset.
 func (c *Config) Require(key string) (string, error) {

@@ -143,8 +143,7 @@ type RepoTemplateData struct {
 	DefaultDirection string
 
 	// Event generation (from @event annotations).
-	HasEvents bool
-	Events    []RepoEventInfo
+	Events []RepoEventInfo
 
 	// SkipStorer suppresses Storer interface generation when the developer
 	// has defined their own in repository.go.
@@ -480,7 +479,6 @@ func buildRepoTemplateData(resolved *ResolvedFile) (RepoTemplateData, error) {
 		HasRecordStateInCreate: hasRecordStateInCreate,
 		PKIsUUID:               pkIsUUID(resolved),
 		DefaultDirection:  defaultDirection,
-		HasEvents:         true,
 		Events:            events,
 	}, nil
 }

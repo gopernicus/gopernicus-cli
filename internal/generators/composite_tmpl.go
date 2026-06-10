@@ -14,9 +14,7 @@ import (
 
 	"{{.FrameworkPath}}/infrastructure/cache"
 	"{{.FrameworkPath}}/infrastructure/database/postgres/pgxdb"
-{{- if .HasEvents}}
 	gopevents "{{.FrameworkPath}}/infrastructure/events"
-{{- end}}
 )
 {{if not .OmitTypes}}
 // Repositories contains all repositories for the {{.DomainPkg}} domain.
@@ -34,23 +32,13 @@ type Repositories struct {
 {{- end}}
 // db accepts *pgxdb.Pool for normal operations or a pgx.Tx for transactional workflows.
 // If c is nil, cache is a passthrough (no caching, falls through to database).
-{{- if .HasEvents}}
 func NewRepositories{{.ConstructorSuffix}}(log *slog.Logger, db pgxdb.Querier, c *cache.Cache, bus gopevents.Bus) *Repositories {
-{{- else}}
-func NewRepositories{{.ConstructorSuffix}}(log *slog.Logger, db pgxdb.Querier, c *cache.Cache) *Repositories {
-{{- end}}
 	return &Repositories{
 {{- range .Entities}}
-{{- if .HasEvents}}
 		{{.FieldName}}: {{.RepoPkg}}.NewRepository(
 			{{.RepoPkg}}.{{if .CacheKeyPrefix}}NewCacheStoreWithKeyPrefix({{.StorePkg}}.NewStore(log, db), c, "{{.CacheKeyPrefix}}"){{else}}NewCacheStore({{.StorePkg}}.NewStore(log, db), c){{end}},
 			{{.RepoPkg}}.WithEventBus(bus),
 		),
-{{- else}}
-		{{.FieldName}}: {{.RepoPkg}}.NewRepository(
-			{{.RepoPkg}}.{{if .CacheKeyPrefix}}NewCacheStoreWithKeyPrefix({{.StorePkg}}.NewStore(log, db), c, "{{.CacheKeyPrefix}}"){{else}}NewCacheStore({{.StorePkg}}.NewStore(log, db), c){{end}},
-		),
-{{- end}}
 {{- end}}
 	}
 }
@@ -79,9 +67,7 @@ import (
 
 	"{{.FrameworkPath}}/infrastructure/cache"
 	"{{.FrameworkPath}}/infrastructure/database/crud"
-{{- if .HasEvents}}
 	gopevents "{{.FrameworkPath}}/infrastructure/events"
-{{- end}}
 )
 {{if not .OmitTypes}}
 // TxRunner executes fn inside a transaction, providing a tx-scoped querier.
@@ -109,11 +95,7 @@ type Repositories struct {
 // transaction on the same connection.
 {{- end}}
 // If c is nil, cache is a passthrough (no caching, falls through to database).
-{{- if .HasEvents}}
 func NewRepositories{{.ConstructorSuffix}}(log *slog.Logger, q crud.Querier, d crud.Dialect, inTx TxRunner, c *cache.Cache, bus gopevents.Bus) (*Repositories, error) {
-{{- else}}
-func NewRepositories{{.ConstructorSuffix}}(log *slog.Logger, q crud.Querier, d crud.Dialect, inTx TxRunner, c *cache.Cache) (*Repositories, error) {
-{{- end}}
 {{- range .Entities}}
 	{{.RepoPkg}}Store, err := {{.StorePkg}}.NewStore(q, d, {{.StorePkg}}.TxRunner(inTx))
 	if err != nil {
@@ -123,16 +105,10 @@ func NewRepositories{{.ConstructorSuffix}}(log *slog.Logger, q crud.Querier, d c
 
 	return &Repositories{
 {{- range .Entities}}
-{{- if .HasEvents}}
 		{{.FieldName}}: {{.RepoPkg}}.NewRepository(
 			{{.RepoPkg}}.{{if .CacheKeyPrefix}}NewCacheStoreWithKeyPrefix({{.RepoPkg}}Store, c, "{{.CacheKeyPrefix}}"){{else}}NewCacheStore({{.RepoPkg}}Store, c){{end}},
 			{{.RepoPkg}}.WithEventBus(bus),
 		),
-{{- else}}
-		{{.FieldName}}: {{.RepoPkg}}.NewRepository(
-			{{.RepoPkg}}.{{if .CacheKeyPrefix}}NewCacheStoreWithKeyPrefix({{.RepoPkg}}Store, c, "{{.CacheKeyPrefix}}"){{else}}NewCacheStore({{.RepoPkg}}Store, c){{end}},
-		),
-{{- end}}
 {{- end}}
 	}, nil
 }

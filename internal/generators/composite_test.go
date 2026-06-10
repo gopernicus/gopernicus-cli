@@ -1,7 +1,6 @@
 package generators
 
 import (
-	"go/format"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,11 +14,10 @@ func specCompositeData() CompositeTemplateData {
 		FrameworkPath: gopernicusFrameworkPath,
 		DomainPath:    "core/repositories/auth",
 		Entities: []CompositeEntity{
-			{FieldName: "Credential", RepoPkg: "credentials", StorePkg: "credentialsstore", EntityName: "Credential", HasEvents: true},
-			{FieldName: "User", RepoPkg: "users", StorePkg: "usersstore", EntityName: "User", HasEvents: true},
+			{FieldName: "Credential", RepoPkg: "credentials", StorePkg: "credentialsstore", EntityName: "Credential"},
+			{FieldName: "User", RepoPkg: "users", StorePkg: "usersstore", EntityName: "User"},
 		},
-		HasEvents: true,
-		SpecMode:  true,
+		SpecMode: true,
 	}
 }
 
@@ -82,35 +80,6 @@ func TestCompositeSpecRender(t *testing.T) {
 
 	if t.Failed() {
 		t.Logf("generated_composite.go:\n%s", generated)
-	}
-}
-
-// TestCompositeSpecRender_NoEvents covers the events-free constructor variant.
-func TestCompositeSpecRender_NoEvents(t *testing.T) {
-	data := specCompositeData()
-	data.HasEvents = false
-	for i := range data.Entities {
-		data.Entities[i].HasEvents = false
-	}
-
-	out, err := renderCompositeTemplate(compositeSpecGeneratedTemplate, data)
-	if err != nil {
-		t.Fatalf("render: %v", err)
-	}
-	formatted, err := format.Source(out)
-	if err != nil {
-		t.Fatalf("go/format: %v\n--- output ---\n%s", err, out)
-	}
-	generated := string(formatted)
-
-	if !strings.Contains(generated,
-		"func NewRepositories(log *slog.Logger, q crud.Querier, d crud.Dialect, inTx TxRunner, c *cache.Cache) (*Repositories, error)") {
-		t.Errorf("missing events-free constructor signature\n--- output ---\n%s", generated)
-	}
-	for _, banned := range []string{"events.Bus", "WithEventBus"} {
-		if strings.Contains(generated, banned) {
-			t.Errorf("events-free composite must not contain %q", banned)
-		}
 	}
 }
 
@@ -208,10 +177,9 @@ func singleEventOutboxData(storePkg string, specMode bool) CompositeTemplateData
 		FrameworkPath: gopernicusFrameworkPath,
 		DomainPath:    "core/repositories/events",
 		Entities: []CompositeEntity{
-			{FieldName: "EventOutbox", RepoPkg: "eventoutbox", StorePkg: storePkg, EntityName: "EventOutbox", HasEvents: true},
+			{FieldName: "EventOutbox", RepoPkg: "eventoutbox", StorePkg: storePkg, EntityName: "EventOutbox"},
 		},
-		HasEvents: true,
-		SpecMode:  specMode,
+		SpecMode: specMode,
 	}
 }
 

@@ -213,7 +213,6 @@ func runNested(cfg Config, schemas map[string]*schema.ReflectedSchema, modulePat
 				RepoPkg:    resolved.PackageName,
 				StorePkg:   StorePackage(resolved.TableName, suffix),
 				EntityName: resolved.EntityName,
-				HasEvents:  true, // always available — custom methods may need the event bus
 			}
 			if multiHomed {
 				entity.CacheKeyPrefix = db + ":" + b.Domain + ":" + resolved.TableName
@@ -267,7 +266,6 @@ func runNested(cfg Config, schemas map[string]*schema.ReflectedSchema, modulePat
 					FrameworkPath: gopernicusFrameworkPath,
 					DomainPath:    "core/repositories/" + domain,
 					Entities:      dbDomainEntities[dbDomainKey{DB: db, Domain: domain}],
-					HasEvents:     true, // always available — custom methods may need the event bus
 					HasAuth:       hasAuthProvider,
 					SpecMode:      dbModes[db] == manifest.StoreModeSpec,
 				},

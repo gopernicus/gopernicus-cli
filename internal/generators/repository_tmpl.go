@@ -25,9 +25,7 @@ import (
 
 	"{{.FrameworkPath}}/sdk/errs"
 	"{{.FrameworkPath}}/sdk/fop"
-{{- if .HasEvents}}
 	"{{.FrameworkPath}}/infrastructure/events"
-{{- end}}
 )
 
 // =============================================================================
@@ -135,7 +133,6 @@ type {{.ReturnTypeName}} struct {
 }
 {{end}}
 {{- end}}
-{{- if .HasEvents}}
 // =============================================================================
 // Event structs
 // =============================================================================
@@ -168,7 +165,6 @@ type {{.AliasName}} struct {
 }
 {{- end}}
 {{end}}
-{{- end}}
 {{if .HasList}}
 // =============================================================================
 // Cursor helpers
@@ -432,9 +428,7 @@ func (r *Repository) {{.Name}}({{.Params}}) error {
 var _ = time.Time{}
 var _ = fop.Order{}
 var _ context.Context
-{{- if .HasEvents}}
 var _ events.Event
-{{- end}}
 `
 
 // =============================================================================
@@ -455,9 +449,7 @@ import (
 	"context"
 
 	"{{.FrameworkPath}}/infrastructure/cryptids"
-{{- if .HasEvents}}
 	"{{.FrameworkPath}}/infrastructure/events"
-{{- end}}
 	"{{.FrameworkPath}}/sdk/fop"
 )
 
@@ -484,9 +476,7 @@ type Storer interface {
 type Repository struct {
 	store      Storer
 	generateID func() (string, error)
-{{- if .HasEvents}}
 	bus        events.Bus
-{{- end}}
 }
 
 // Option configures a Repository.
@@ -496,13 +486,11 @@ type Option func(*Repository)
 func WithGenerateID(fn func() (string, error)) Option {
 	return func(r *Repository) { r.generateID = fn }
 }
-{{- if .HasEvents}}
 
 // WithEventBus configures the event bus for emitting domain events.
 func WithEventBus(bus events.Bus) Option {
 	return func(r *Repository) { r.bus = bus }
 }
-{{- end}}
 
 // NewRepository creates a new {{.EntityName}} repository.
 func NewRepository(store Storer, opts ...Option) *Repository {

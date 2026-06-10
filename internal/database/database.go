@@ -12,7 +12,6 @@
 //	Driver       — every store must implement (connection lifecycle)
 //	Migrator     — SQL databases: apply/track schema migration files
 //	Reflector    — SQL databases: read live schema into ReflectedSchema
-//	IndexManager — document/NoSQL stores: sync and inspect index definitions
 package database
 
 import (
@@ -50,16 +49,6 @@ type Reflector interface {
 	Reflect(ctx context.Context, schemaName string) (*schema.ReflectedSchema, error)
 }
 
-// IndexManager is implemented by document/NoSQL stores that manage indexes
-// through definition files rather than SQL migrations.
-type IndexManager interface {
-	// SyncIndexes applies index definitions from indexDir to the database.
-	SyncIndexes(ctx context.Context, indexDir string) error
-
-	// IndexStatus returns the current state of indexes relative to definitions.
-	IndexStatus(ctx context.Context, indexDir string) ([]IndexStatus, error)
-}
-
 // MigrationStatus describes a single migration file.
 type MigrationStatus struct {
 	// Version is the filename (e.g. "20260224120000_create_users.sql").
@@ -74,16 +63,4 @@ type MigrationStatus struct {
 	// Tampered is true when the file has been modified after being applied
 	// (the on-disk checksum no longer matches the recorded checksum).
 	Tampered bool
-}
-
-// IndexStatus describes a single index definition.
-type IndexStatus struct {
-	// Name is the index name as defined in the index file.
-	Name string
-
-	// Synced is true if the live index matches the definition.
-	Synced bool
-
-	// Definition is the index definition as seen in the database.
-	Definition string
 }

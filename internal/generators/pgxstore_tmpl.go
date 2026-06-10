@@ -584,7 +584,3 @@ const storeBootstrapTemplate = `// This file is created once by gopernicus and w
 
 package {{.PackageName}}
 `
-
-// storeFopTemplate is no longer used — filter functions are called directly
-// from generated.go without wrapper indirection.
-const storeFopTemplate = ``
