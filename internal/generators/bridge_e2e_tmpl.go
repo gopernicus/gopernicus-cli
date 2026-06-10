@@ -14,12 +14,15 @@ package {{.BridgePackage}}
 
 import (
 	"context"
-{{- if .HasRecordState}}
+{{- if or .HasRecordState .CreateMaxBodySize}}
 	"encoding/json"
 {{- end}}
 	"net/http/httptest"
 {{- if .HasList}}
 	"net/url"
+{{- end}}
+{{- if .CreateMaxBodySize}}
+	"strings"
 {{- end}}
 	"testing"
 
@@ -151,6 +154,21 @@ func TestE2E{{.EntityName}}SQLInjection(t *testing.T) {
 				"param %q payload %q must not cause a server error", param, payload)
 		}
 	}
+}
+{{end}}{{if .CreateMaxBodySize}}
+func TestE2E{{.EntityName}}OversizedPayload(t *testing.T) {
+	client := setupE2EServer(t)
+
+	// A body past the route's max_body_size ({{.CreateMaxBodySize}} bytes) must
+	// be rejected with 413, not accepted or 500'd. Pad a valid request with a
+	// huge string field the server ignores so only the size trips the limit.
+	raw, err := json.Marshal(validCreate{{.EntityName}}Request())
+	require.NoError(t, err)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(raw, &body))
+	body["_padding"] = strings.Repeat("A", {{.CreateMaxBodySize}}+1)
+
+	client.Post(t, "{{.CreatePath}}", body).RequireStatus(t, 413)
 }
 {{end}}{{if .HasRecordState}}
 func TestE2E{{.EntityName}}MassAssignment(t *testing.T) {

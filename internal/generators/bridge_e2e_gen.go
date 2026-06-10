@@ -30,6 +30,10 @@ type BridgeE2EData struct {
 
 	CreatePath string // POST path, no params
 
+	// CreateMaxBodySize is the create route's max_body_size in bytes (0 =
+	// none) — gates the oversized-payload probe (P6).
+	CreateMaxBodySize int64
+
 	HasGet      bool
 	GetPathExpr string // Go expr building the GET path from `id`
 
@@ -158,6 +162,12 @@ func buildBridgeE2EData(data BridgeTemplateData, resolved *ResolvedFile, moduleP
 		case "Create":
 			if r.Method == "POST" && !strings.Contains(r.Path, "{") {
 				e2e.CreatePath = r.Path
+				for _, m := range r.MiddlewareChain {
+					if m.MaxBodySize > 0 {
+						e2e.CreateMaxBodySize = m.MaxBodySize
+						break
+					}
+				}
 			}
 		case "Get":
 			if expr, ok := pkOnlyPathExpr(r.Path, pkParam); ok {

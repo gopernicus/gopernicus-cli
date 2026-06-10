@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gopernicus/gopernicus-cli/internal/generators"
 	"github.com/gopernicus/gopernicus-cli/internal/goversion"
 	"github.com/gopernicus/gopernicus-cli/internal/manifest"
 	"github.com/gopernicus/gopernicus-cli/internal/project"
@@ -54,6 +55,7 @@ func runDoctor(_ context.Context, _ []string) error {
 		checkFrameworkDep(root),
 	}
 	checks = append(checks, checkSQLGuards(root)...)
+	checks = append(checks, checkBodyLimits(root))
 
 	allPassed := true
 	for _, c := range checks {
@@ -160,6 +162,50 @@ func checkSQLGuards(root string) []check {
 		checks = append(checks, check{name: "sql: Pred.Raw usage", passed: true, warn: true, detail: detail})
 	}
 	return checks
+}
+
+// checkBodyLimits warns when a write route (Create/Update) in any bridge.yml
+// has no max_body_size middleware — unbounded request bodies are a
+// resource-exhaustion vector (P6). A warning, not a failure: the default
+// limit may be intentional.
+func checkBodyLimits(root string) check {
+	var unbounded []string
+
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || filepath.Base(path) != "bridge.yml" {
+			return nil
+		}
+		yml, perr := generators.ParseBridgeYML(path)
+		if perr != nil || yml == nil {
+			return nil
+		}
+		for _, route := range yml.Routes {
+			if route.Func != "Create" && route.Func != "Update" {
+				continue
+			}
+			hasLimit := false
+			for _, mw := range route.Middleware {
+				if mw.MaxBodySize > 0 {
+					hasLimit = true
+					break
+				}
+			}
+			if !hasLimit {
+				rel, _ := filepath.Rel(root, path)
+				unbounded = append(unbounded, fmt.Sprintf("%s:%s", rel, route.Func))
+			}
+		}
+		return nil
+	})
+
+	if len(unbounded) == 0 {
+		return check{name: "bridge: write routes bound body size", passed: true}
+	}
+	detail := unbounded[0] + " has no max_body_size"
+	if len(unbounded) > 1 {
+		detail = fmt.Sprintf("%s (+%d more)", detail, len(unbounded)-1)
+	}
+	return check{name: "bridge: write routes bound body size", passed: true, warn: true, detail: detail}
 }
 
 func checkFrameworkDep(root string) check {
