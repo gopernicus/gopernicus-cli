@@ -96,6 +96,10 @@ func GenerateBridge(resolved *ResolvedFile, domainName, modulePath, projectRoot 
 		return false, fmt.Errorf("bridge validation tests: %w", err)
 	}
 
+	if err := GenerateBridgeSecurity(data, bridgeDir, opts); err != nil {
+		return false, fmt.Errorf("bridge security tests: %w", err)
+	}
+
 	if specDB != "" {
 		if err := GenerateBridgeE2E(data, resolved, bridgeDir, modulePath, specDB, opts); err != nil {
 			return false, fmt.Errorf("bridge e2e tests: %w", err)
