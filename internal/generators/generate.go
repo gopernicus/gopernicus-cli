@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/gopernicus/gopernicus-cli/internal/manifest"
@@ -22,12 +21,23 @@ type Config struct {
 	ForceBootstrap bool
 }
 
-// Run executes code generation, dispatching on the manifest's domain shape:
-// when any database declares domains (the nested shape,
-// databases.<name>.domains), the manifest is the sole binding source and
-// generation iterates database×domain×entity; otherwise the legacy path
-// scans for queries.sql files and binds each via its @database: annotation.
+// Run executes code generation. The manifest's nested domain shape
+// (databases.<name>.domains) is the sole binding source; generation iterates
+// database×domain×entity. A manifest without nested domains is an error.
 func Run(cfg Config) error {
+	if !cfg.Manifest.NestedDomainsDeclared() {
+		return fmt.Errorf(
+			"gopernicus.yml declares no domains under any database\n\n" +
+				"Declare your entities under databases.<name>.domains, e.g.:\n\n" +
+				"  databases:\n" +
+				"    primary:\n" +
+				"      driver: postgres\n" +
+				"      domains:\n" +
+				"        auth: [users, sessions]\n\n" +
+				"(A top-level `domains:` key is no longer supported; move it under its database.)",
+		)
+	}
+
 	schemas, err := loadSchemas(cfg.ProjectRoot, cfg.Manifest)
 	if err != nil {
 		return err
@@ -51,155 +61,7 @@ func Run(cfg Config) error {
 		fmt.Println("=== DRY RUN — no files written ===")
 	}
 
-	if cfg.Manifest.NestedDomainsDeclared() {
-		return runNested(cfg, schemas, modulePath, opts)
-	}
-	return runLegacy(cfg, schemas, modulePath, opts)
-}
-
-// runLegacy is the discovery-driven path: every queries.sql under
-// core/repositories/ is generated, bound to a database by its @database:
-// annotation (default "primary").
-func runLegacy(cfg Config, schemas map[string]*schema.ReflectedSchema, modulePath string, opts Options) error {
-	repoRoot := filepath.Join(cfg.ProjectRoot, "core", "repositories")
-	queryFiles, err := discoverQueryFiles(repoRoot, cfg.Domain)
-	if err != nil {
-		return err
-	}
-
-	if len(queryFiles) == 0 {
-		return fmt.Errorf(
-			"no queries.sql files found under %s\n\n"+
-				"Run 'gopernicus new repo <domain/entity>' to scaffold a repository.",
-			repoRoot,
-		)
-	}
-
-	// Collect entities per domain for composite generation.
-	domainEntities := make(map[string][]CompositeEntity)
-	domainBridgeEntities := make(map[string][]BridgeCompositeEntity) // entities with a bridge.yml
-	var pgxFixtureEntities, specFixtureEntities []FixtureEntity      // entities for fixture generation (cross-domain, per store mode)
-	domainDirs := make(map[string]string)                            // domain name → absolute dir path
-	domainTableNames := make(map[string]map[string]string)           // domain → (pkgName → tableName)
-	domainResolvedFiles := make(map[string][]*ResolvedFile)          // domain → resolved files (for auth schema)
-
-	authEnabled := cfg.Manifest.Features.AuthenticationEnabled()
-	authzProvider := cfg.Manifest.Features.AuthorizationProvider()
-
-	domainStoreModes := make(map[string]manifest.StoreMode) // domain → resolved store mode
-
-	for _, qfPath := range queryFiles {
-		resolved, storeMode, err := generateFromQueryFile(qfPath, schemas, cfg.Manifest, modulePath, cfg.ProjectRoot, authEnabled, opts)
-		if err != nil {
-			return fmt.Errorf("%s: %w", qfPath, err)
-		}
-		if resolved == nil {
-			continue // skipped (no matching table)
-		}
-
-		// Inject auth schema from bridge.yml into resolved file (for domain-level auth schema generation).
-		injectBridgeAuthSchema(resolved, cfg.ProjectRoot)
-		ymlPath := bridgeYMLPath(resolved.DomainName, resolved.TableName, cfg.ProjectRoot)
-
-		domain := resolved.DomainName
-		if domain != "" {
-			if prev, ok := domainStoreModes[domain]; ok && prev != storeMode {
-				return fmt.Errorf(
-					"domain %q mixes store modes (%s and %s); all entities in a domain must share one store mode",
-					domain, prev, storeMode,
-				)
-			}
-			domainStoreModes[domain] = storeMode
-
-			domainEntities[domain] = append(domainEntities[domain], BuildCompositeEntity(resolved))
-			if _, ok := domainDirs[domain]; !ok {
-				domainDirs[domain] = filepath.Join(repoRoot, domain)
-			}
-			if domainTableNames[domain] == nil {
-				domainTableNames[domain] = make(map[string]string)
-			}
-			domainTableNames[domain][resolved.PackageName] = resolved.TableName
-			domainResolvedFiles[domain] = append(domainResolvedFiles[domain], resolved)
-
-			// Track entities that have a bridge.yml for bridge composite generation.
-			if fileExists(ymlPath) {
-				domainBridgeEntities[domain] = append(domainBridgeEntities[domain], BuildBridgeCompositeEntity(resolved))
-			}
-
-			// Track entities for fixture generation, per store mode.
-			if storeMode == manifest.StoreModeSpec {
-				specFixtureEntities = append(specFixtureEntities, BuildFixtureEntity(resolved, modulePath))
-			} else {
-				pgxFixtureEntities = append(pgxFixtureEntities, BuildFixtureEntity(resolved, modulePath))
-			}
-		}
-	}
-
-	// Generate domain composites and auth schemas.
-	for domain, entities := range domainEntities {
-		domainDir := domainDirs[domain]
-		_, hasAuthProvider := authSchemaRegistry[authzProvider]
-
-		data := CompositeTemplateData{
-			DomainPkg:     domain,
-			ModulePath:    modulePath,
-			FrameworkPath: gopernicusFrameworkPath,
-			DomainPath:    "core/repositories/" + domain,
-			Entities:      entities,
-			HasEvents:     true, // always available — custom methods may need the event bus
-			HasAuth:       hasAuthProvider,
-			SpecMode:      domainStoreModes[domain] == manifest.StoreModeSpec,
-		}
-		fmt.Printf("\n  %s/ (domain composite)\n", domain)
-		if err := GenerateComposite(data, domainDir, opts); err != nil {
-			return fmt.Errorf("composite %s: %w", domain, err)
-		}
-
-	}
-
-	// Generate bridge composites and auth schemas for domains with bridge routes.
-	if err := emitBridgeComposites(cfg, modulePath, authEnabled, authzProvider, domainBridgeEntities, domainResolvedFiles, opts); err != nil {
-		return err
-	}
-
-	// Generate test fixtures. The fixtures file is a single package across ALL
-	// domains so cross-domain FK chains resolve (e.g. a graph entity referencing
-	// a worlds entity needs the worlds fixture in scope). When a domain filter
-	// is active, augment the in-scope entities with parse+resolve of every other
-	// domain's queries.sql so we don't overwrite the file with only the filtered
-	// domain's entities.
-	if cfg.Domain != "" {
-		inScope := make(map[string]bool, len(queryFiles))
-		for _, qf := range queryFiles {
-			inScope[qf] = true
-		}
-		allQueryFiles, err := discoverQueryFiles(repoRoot, "")
-		if err != nil {
-			return fmt.Errorf("discover all queries for fixtures: %w", err)
-		}
-		for _, qfPath := range allQueryFiles {
-			if inScope[qfPath] {
-				continue
-			}
-			resolved, dbName, err := resolveForFixture(qfPath, schemas, cfg.ProjectRoot)
-			if err != nil {
-				return fmt.Errorf("%s: resolve for fixture: %w", qfPath, err)
-			}
-			if resolved == nil {
-				continue
-			}
-			mode, err := cfg.Manifest.DatabaseOrDefault(dbName).StoreMode()
-			if err != nil {
-				return fmt.Errorf("%s: store mode: %w", qfPath, err)
-			}
-			if mode == manifest.StoreModeSpec {
-				specFixtureEntities = append(specFixtureEntities, BuildFixtureEntity(resolved, modulePath))
-			} else {
-				pgxFixtureEntities = append(pgxFixtureEntities, BuildFixtureEntity(resolved, modulePath))
-			}
-		}
-	}
-	return emitFixtures(pgxFixtureEntities, specFixtureEntities, cfg.ProjectRoot, modulePath, opts)
+	return runNested(cfg, schemas, modulePath, opts)
 }
 
 // injectBridgeAuthSchema overrides the resolved file's auth relations and
@@ -321,98 +183,6 @@ func emitFixtures(pgxEntities, specEntities []FixtureEntity, projectRoot, module
 	return nil
 }
 
-func generateFromQueryFile(
-	qfPath string,
-	schemas map[string]*schema.ReflectedSchema,
-	m *manifest.Manifest,
-	modulePath, projectRoot string,
-	authEnabled bool,
-	opts Options,
-) (*ResolvedFile, manifest.StoreMode, error) {
-	qf, err := Parse(qfPath)
-	if err != nil {
-		return nil, "", err
-	}
-
-	storeMode, err := m.DatabaseOrDefault(qf.Database).StoreMode()
-	if err != nil {
-		return nil, "", fmt.Errorf("database %q: %w", qf.Database, err)
-	}
-
-	repoDir := filepath.Dir(qfPath)
-	dirName := filepath.Base(repoDir)
-
-	tableName, schemaName, err := inferTableName(dirName, schemas, qf.Database)
-	if err != nil {
-		if opts.Verbose {
-			fmt.Printf("  skip %s (no matching table in schema)\n", dirName)
-		}
-		return nil, "", nil
-	}
-	qf.Table = tableName
-
-	key := qf.Database + ":" + schemaName
-	s, ok := schemas[key]
-	if !ok {
-		return nil, "", fmt.Errorf(
-			"reflected schema for database %q schema %q not found\n\n"+
-				"Run 'gopernicus db reflect' to generate it.",
-			qf.Database, schemaName,
-		)
-	}
-
-	domainName := domainFromPath(qfPath, projectRoot)
-
-	resolved, err := Resolve(qf, s, domainName)
-	if err != nil {
-		return nil, "", err
-	}
-
-	fmt.Printf("\n  %s (table: %s)\n", filepath.Base(repoDir), resolved.TableName)
-
-	// Generate repository layer.
-	if err := GenerateRepository(resolved, repoDir, opts); err != nil {
-		return nil, "", fmt.Errorf("repository: %w", err)
-	}
-
-	// Generate the store layer per the database's store mode.
-	switch storeMode {
-	case manifest.StoreModeSpec:
-		// Composite wiring imports the spec store package, not the pgx one.
-		resolved.StorePkg = StorePackage(resolved.TableName, specStorePackageSuffix)
-
-		if err := GenerateSpecStore(resolved, repoDir, modulePath, opts); err != nil {
-			return nil, "", fmt.Errorf("specstore: %w", err)
-		}
-		if err := generateSpecStoreTests(resolved, domainName, modulePath, projectRoot, qf.Database, opts); err != nil {
-			return nil, "", err
-		}
-
-	default: // manifest.StoreModePgx
-		if err := generatePgxStoreAndTests(resolved, domainName, modulePath, projectRoot, qf.Database, opts); err != nil {
-			return nil, "", err
-		}
-	}
-
-	// Generate cache layer (only if any @cache annotations exist).
-	if generated, err := GenerateCache(resolved, repoDir, false, opts); err != nil {
-		return nil, "", fmt.Errorf("cache: %w", err)
-	} else if generated && opts.Verbose {
-		fmt.Printf("    generated cache layer\n")
-	}
-
-	// Generate bridge layer (from bridge.yml). e2e boots against this
-	// entity's hosting database in its store mode.
-	specMode := storeMode == manifest.StoreModeSpec
-	if generated, err := GenerateBridge(resolved, domainName, modulePath, projectRoot, authEnabled, qf.Database, specMode, opts); err != nil {
-		return nil, "", fmt.Errorf("bridge: %w", err)
-	} else if generated && opts.Verbose {
-		fmt.Printf("    generated bridge layer\n")
-	}
-
-	return resolved, storeMode, nil
-}
-
 // generatePgxStoreAndTests generates the pgx store plus its integration
 // tests, unless the entity opted out via `-- @skip-integration-test` in
 // queries.sql. When skipped, any previously generated test file is removed so
@@ -477,46 +247,6 @@ func generateSpecStoreTests(resolved *ResolvedFile, domainName, modulePath, proj
 	return nil
 }
 
-// resolveForFixture parses and resolves a queries.sql file without running
-// any code generation. Used to collect FixtureEntity data for entities that
-// live outside the current `--domain` filter, so the fixtures package can stay
-// cumulative across domains. Returns (nil, nil) if the table cannot be
-// matched against any reflected schema (same skip semantics as
-// generateFromQueryFile).
-func resolveForFixture(
-	qfPath string,
-	schemas map[string]*schema.ReflectedSchema,
-	projectRoot string,
-) (*ResolvedFile, string, error) {
-	qf, err := Parse(qfPath)
-	if err != nil {
-		return nil, "", err
-	}
-
-	repoDir := filepath.Dir(qfPath)
-	dirName := filepath.Base(repoDir)
-
-	tableName, schemaName, err := inferTableName(dirName, schemas, qf.Database)
-	if err != nil {
-		return nil, "", nil
-	}
-	qf.Table = tableName
-
-	key := qf.Database + ":" + schemaName
-	s, ok := schemas[key]
-	if !ok {
-		return nil, "", fmt.Errorf(
-			"reflected schema for database %q schema %q not found\n\n"+
-				"Run 'gopernicus db reflect' to generate it.",
-			qf.Database, schemaName,
-		)
-	}
-
-	domainName := domainFromPath(qfPath, projectRoot)
-	resolved, err := Resolve(qf, s, domainName)
-	return resolved, qf.Database, err
-}
-
 func loadSchemas(root string, m *manifest.Manifest) (map[string]*schema.ReflectedSchema, error) {
 	result := make(map[string]*schema.ReflectedSchema)
 
@@ -547,51 +277,6 @@ func loadSchemas(root string, m *manifest.Manifest) (map[string]*schema.Reflecte
 	}
 
 	return result, nil
-}
-
-func discoverQueryFiles(repoRoot, domainFilter string) ([]string, error) {
-	var result []string
-
-	searchRoot := repoRoot
-	if domainFilter != "" {
-		searchRoot = filepath.Join(repoRoot, domainFilter)
-	}
-
-	err := filepath.Walk(searchRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			return err
-		}
-		if !info.IsDir() && info.Name() == "queries.sql" {
-			result = append(result, path)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	sort.Strings(result)
-	return result, nil
-}
-
-func domainFromPath(qfPath, projectRoot string) string {
-	repoDir := filepath.Dir(qfPath)
-	parent := filepath.Dir(repoDir)
-	repoRoot := filepath.Join(projectRoot, "core", "repositories")
-
-	if parent == repoRoot {
-		return ""
-	}
-
-	rel, err := filepath.Rel(repoRoot, parent)
-	if err != nil || rel == "." {
-		return ""
-	}
-	parts := strings.SplitN(rel, string(filepath.Separator), 2)
-	return parts[0]
 }
 
 func inferTableName(dirName string, schemas map[string]*schema.ReflectedSchema, dbName string) (tableName, schemaName string, err error) {

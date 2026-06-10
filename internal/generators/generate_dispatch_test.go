@@ -3,6 +3,7 @@ package generators
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gopernicus/gopernicus-cli/internal/manifest"
@@ -31,30 +32,29 @@ func writeDispatchProject(t *testing.T) (string, string, map[string]*schema.Refl
 	return root, qfPath, schemas
 }
 
+// dispatchManifest binds auth/users to a single primary database with the
+// given driver.
+func dispatchManifest(driver string) *manifest.Manifest {
+	return &manifest.Manifest{
+		Databases: map[string]*manifest.DatabaseConfig{
+			"primary": {
+				Driver:    driver,
+				URLEnvVar: "APP_DB_URL",
+				Domains:   map[string][]string{"auth": {"users"}},
+			},
+		},
+	}
+}
+
 // TestGenerateDispatch_SpecMode verifies that a sqlite database routes store
-// generation to the spec store (no pgx store, no integration tests) and
-// repoints the composite StorePkg at the spec package.
+// generation to the spec store (no pgx store) and wires the composite to the
+// spec package.
 func TestGenerateDispatch_SpecMode(t *testing.T) {
 	root, qfPath, schemas := writeDispatchProject(t)
 
-	m := &manifest.Manifest{
-		Databases: map[string]*manifest.DatabaseConfig{
-			"primary": {Driver: manifest.DriverSQLite, URLEnvVar: "APP_DB_URL"},
-		},
-	}
-
-	resolved, storeMode, err := generateFromQueryFile(qfPath, schemas, m, "github.com/example/app", root, false, Options{})
-	if err != nil {
-		t.Fatalf("generateFromQueryFile: %v", err)
-	}
-	if resolved == nil {
-		t.Fatal("entity was skipped")
-	}
-	if storeMode != manifest.StoreModeSpec {
-		t.Errorf("store mode = %q, want %q", storeMode, manifest.StoreModeSpec)
-	}
-	if resolved.StorePkg != "usersstore" {
-		t.Errorf("StorePkg = %q, want %q (composite must import the spec store)", resolved.StorePkg, "usersstore")
+	cfg := Config{ProjectRoot: root, Manifest: dispatchManifest(manifest.DriverSQLite)}
+	if err := runNested(cfg, schemas, "github.com/example/app", Options{}); err != nil {
+		t.Fatalf("runNested: %v", err)
 	}
 
 	repoDir := filepath.Dir(qfPath)
@@ -80,6 +80,12 @@ func TestGenerateDispatch_SpecMode(t *testing.T) {
 			t.Errorf("expected spec integration test file %s: %v", want, err)
 		}
 	}
+
+	// The composite must import the spec store package, not the pgx one.
+	composite := mustReadFile(t, filepath.Join(root, "core", "repositories", "auth", "generated_composite.go"))
+	if !strings.Contains(composite, "usersstore.NewStore(") {
+		t.Errorf("composite must wire the spec store\n--- output ---\n%s", composite)
+	}
 }
 
 // TestGenerateDispatch_PgxMode verifies the default (postgres) path is
@@ -87,24 +93,9 @@ func TestGenerateDispatch_SpecMode(t *testing.T) {
 func TestGenerateDispatch_PgxMode(t *testing.T) {
 	root, qfPath, schemas := writeDispatchProject(t)
 
-	m := &manifest.Manifest{
-		Databases: map[string]*manifest.DatabaseConfig{
-			"primary": {Driver: manifest.DriverPostgres, URLEnvVar: "APP_DB_URL"},
-		},
-	}
-
-	resolved, storeMode, err := generateFromQueryFile(qfPath, schemas, m, "github.com/example/app", root, false, Options{})
-	if err != nil {
-		t.Fatalf("generateFromQueryFile: %v", err)
-	}
-	if resolved == nil {
-		t.Fatal("entity was skipped")
-	}
-	if storeMode != manifest.StoreModePgx {
-		t.Errorf("store mode = %q, want %q", storeMode, manifest.StoreModePgx)
-	}
-	if resolved.StorePkg != "userspgx" {
-		t.Errorf("StorePkg = %q, want %q", resolved.StorePkg, "userspgx")
+	cfg := Config{ProjectRoot: root, Manifest: dispatchManifest(manifest.DriverPostgres)}
+	if err := runNested(cfg, schemas, "github.com/example/app", Options{}); err != nil {
+		t.Fatalf("runNested: %v", err)
 	}
 
 	repoDir := filepath.Dir(qfPath)
@@ -121,6 +112,11 @@ func TestGenerateDispatch_PgxMode(t *testing.T) {
 	if _, err := os.Stat(specDir); !os.IsNotExist(err) {
 		t.Errorf("spec store dir %s must not exist in pgx mode", specDir)
 	}
+
+	composite := mustReadFile(t, filepath.Join(root, "core", "repositories", "auth", "generated_composite.go"))
+	if !strings.Contains(composite, "userspgx.NewStore(") {
+		t.Errorf("composite must wire the pgx store\n--- output ---\n%s", composite)
+	}
 }
 
 // TestGenerateDispatch_UnrecognizedDriver verifies manifest validation
@@ -128,13 +124,38 @@ func TestGenerateDispatch_PgxMode(t *testing.T) {
 func TestGenerateDispatch_UnrecognizedDriver(t *testing.T) {
 	root, qfPath, schemas := writeDispatchProject(t)
 
+	cfg := Config{ProjectRoot: root, Manifest: dispatchManifest("mysql")}
+	err := runNested(cfg, schemas, "github.com/example/app", Options{})
+	if err == nil {
+		t.Fatal("expected unrecognized-driver error, got nil")
+	}
+	if !strings.Contains(err.Error(), "unrecognized database driver") {
+		t.Errorf("error %q missing driver context", err)
+	}
+
+	repoDir := filepath.Dir(qfPath)
+	if _, err := os.Stat(filepath.Join(repoDir, "generated.go")); !os.IsNotExist(err) {
+		t.Errorf("driver validation must fail before any file is written")
+	}
+}
+
+// TestRun_RequiresNestedDomains pins the hard error when gopernicus.yml binds
+// nothing under databases.<name>.domains (including the retired top-level
+// domains shape).
+func TestRun_RequiresNestedDomains(t *testing.T) {
+	root, _, _ := writeDispatchProject(t)
+
 	m := &manifest.Manifest{
 		Databases: map[string]*manifest.DatabaseConfig{
-			"primary": {Driver: "mysql", URLEnvVar: "APP_DB_URL"},
+			"primary": {Driver: manifest.DriverPostgres, URLEnvVar: "APP_DB_URL"},
 		},
 	}
 
-	if _, _, err := generateFromQueryFile(qfPath, schemas, m, "github.com/example/app", root, false, Options{}); err == nil {
-		t.Fatal("expected unrecognized-driver error, got nil")
+	err := Run(Config{ProjectRoot: root, Manifest: m})
+	if err == nil {
+		t.Fatal("expected missing nested-domains error, got nil")
+	}
+	if !strings.Contains(err.Error(), "databases.<name>.domains") {
+		t.Errorf("error %q must point at databases.<name>.domains", err)
 	}
 }

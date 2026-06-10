@@ -98,10 +98,6 @@ func runNested(cfg Config, schemas map[string]*schema.ReflectedSchema, modulePat
 	m := cfg.Manifest
 	repoRoot := filepath.Join(cfg.ProjectRoot, "core", "repositories")
 
-	for _, w := range m.DomainShapeWarnings() {
-		fmt.Printf("  warning: %s\n", w)
-	}
-
 	// Validate every database's store mode up front so configuration errors
 	// surface before any file is written.
 	dbModes := make(map[string]manifest.StoreMode)

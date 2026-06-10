@@ -86,9 +86,9 @@ func TestStoreMode(t *testing.T) {
 	}
 }
 
-// TestDomainShapes_Nested covers the nested shape: domains declared under
-// each database become the sole binding source.
-func TestDomainShapes_Nested(t *testing.T) {
+// TestNestedDomains covers the nested shape: domains declared under each
+// database are the sole binding source.
+func TestNestedDomains(t *testing.T) {
 	const src = `
 version: "1"
 databases:
@@ -110,26 +110,24 @@ databases:
 	if !m.NestedDomainsDeclared() {
 		t.Error("NestedDomainsDeclared() = false, want true")
 	}
-	if len(m.DomainShapeWarnings()) != 0 {
-		t.Errorf("DomainShapeWarnings() = %v, want none", m.DomainShapeWarnings())
-	}
 
 	want := map[string][]string{
 		"auth":   {"users", "sessions"},
 		"events": {"event_outbox"},
 	}
-	if got := m.EffectiveDomains("primary"); !reflect.DeepEqual(got, want) {
-		t.Errorf("EffectiveDomains(primary) = %v, want %v", got, want)
+	if got := m.Databases["primary"].Domains; !reflect.DeepEqual(got, want) {
+		t.Errorf("primary domains = %v, want %v", got, want)
 	}
 	wantOther := map[string][]string{"events": {"event_outbox"}}
-	if got := m.EffectiveDomains("otherdb"); !reflect.DeepEqual(got, wantOther) {
-		t.Errorf("EffectiveDomains(otherdb) = %v, want %v", got, wantOther)
+	if got := m.Databases["otherdb"].Domains; !reflect.DeepEqual(got, wantOther) {
+		t.Errorf("otherdb domains = %v, want %v", got, wantOther)
 	}
 }
 
-// TestDomainShapes_Legacy covers the legacy shape: a top-level domains map
-// shared by every database (binding comes from @database: annotations).
-func TestDomainShapes_Legacy(t *testing.T) {
+// TestNestedDomains_LegacyTopLevelKeyIgnored pins that the retired top-level
+// domains shape no longer declares anything: the key parses to nothing and
+// NestedDomainsDeclared stays false (generation reports the hard error).
+func TestNestedDomains_LegacyTopLevelKeyIgnored(t *testing.T) {
 	const src = `
 version: "1"
 domains:
@@ -137,8 +135,6 @@ domains:
 databases:
   primary:
     driver: postgres
-  otherdb:
-    driver: sqlite
 `
 	var m Manifest
 	if err := yaml.Unmarshal([]byte(src), &m); err != nil {
@@ -146,49 +142,7 @@ databases:
 	}
 
 	if m.NestedDomainsDeclared() {
-		t.Error("NestedDomainsDeclared() = true, want false")
-	}
-	if len(m.DomainShapeWarnings()) != 0 {
-		t.Errorf("DomainShapeWarnings() = %v, want none", m.DomainShapeWarnings())
-	}
-
-	want := map[string][]string{"auth": {"users"}}
-	for _, db := range []string{"primary", "otherdb"} {
-		if got := m.EffectiveDomains(db); !reflect.DeepEqual(got, want) {
-			t.Errorf("EffectiveDomains(%s) = %v, want %v (legacy top-level shared by all databases)", db, got, want)
-		}
-	}
-}
-
-// TestDomainShapes_BothWarn covers both shapes at once: the nested shape wins
-// and a warning reports the ignored top-level key.
-func TestDomainShapes_BothWarn(t *testing.T) {
-	const src = `
-version: "1"
-domains:
-  legacy: [old_table]
-databases:
-  primary:
-    driver: postgres
-    domains:
-      auth: [users]
-`
-	var m Manifest
-	if err := yaml.Unmarshal([]byte(src), &m); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-
-	warnings := m.DomainShapeWarnings()
-	if len(warnings) != 1 {
-		t.Fatalf("DomainShapeWarnings() = %v, want exactly one warning", warnings)
-	}
-	if !strings.Contains(warnings[0], "ignored") {
-		t.Errorf("warning %q does not say the top-level key is ignored", warnings[0])
-	}
-
-	want := map[string][]string{"auth": {"users"}}
-	if got := m.EffectiveDomains("primary"); !reflect.DeepEqual(got, want) {
-		t.Errorf("EffectiveDomains(primary) = %v, want nested %v", got, want)
+		t.Error("NestedDomainsDeclared() = true, want false (top-level domains key is retired)")
 	}
 }
 

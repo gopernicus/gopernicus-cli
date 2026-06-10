@@ -107,20 +107,13 @@ func runBootRepos(_ context.Context, args []string) error {
 	// Resolve framework source once for all tables.
 	fwSourceDir, _ := fwsource.ResolveDir() // empty on error; falls back to generic scaffold
 
-	for _, w := range m.DomainShapeWarnings() {
-		fmt.Printf("  warning: %s\n", w)
-	}
-
 	var count int
 	for _, db := range dbNames {
 		dbConf := m.DatabaseOrDefault(db)
 		if dbConf == nil {
 			continue
 		}
-		// Nested shape: each database's own domains. Legacy shape: the
-		// top-level domains map applies to every database (tables not in a
-		// database's reflected schema are skipped below).
-		dbDomains := m.EffectiveDomains(db)
+		dbDomains := dbConf.Domains
 		if len(dbDomains) == 0 {
 			continue
 		}

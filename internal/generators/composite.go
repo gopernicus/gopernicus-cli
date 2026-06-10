@@ -246,17 +246,6 @@ func removeStaleDBCompositeFiles(domainDir string, written map[string]bool, opts
 	return nil
 }
 
-// BuildCompositeEntity creates a CompositeEntity from a resolved file.
-func BuildCompositeEntity(resolved *ResolvedFile) CompositeEntity {
-	return CompositeEntity{
-		FieldName:  resolved.EntityName,
-		RepoPkg:    resolved.PackageName,
-		StorePkg:   resolved.StorePkg,
-		EntityName: resolved.EntityName,
-		HasEvents:  true, // always available — custom methods may need the event bus
-	}
-}
-
 func renderCompositeTemplate(tmplStr string, data any) ([]byte, error) {
 	t, err := template.New("composite").Parse(tmplStr)
 	if err != nil {
