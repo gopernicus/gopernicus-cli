@@ -16,9 +16,6 @@ import (
 
 func TestSecurity{{.EntityName}}AuthenticationRequired(t *testing.T) {
 	client := setupSecurityServer(t)
-	if client == nil {
-		t.Skip("setupSecurityServer not wired — see security_test.go to enable enforcement probes")
-	}
 {{range .Routes}}
 	t.Run("{{.Name}} rejects anonymous", func(t *testing.T) {
 		{{.Call}}.RequireStatus(t, 401)
@@ -40,19 +37,99 @@ const bridgeSecurityBootstrapTemplate = `//go:build security
 package {{.BridgePackage}}
 
 import (
+	"context"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
+{{- if .SpecMode}}
 
+	"github.com/stretchr/testify/require"
+{{- end}}
+
+	"{{.RepoImport}}"
+	"{{.StoreImport}}"
+
+	"{{.FrameworkPath}}/infrastructure/ratelimiter"
+	"{{.FrameworkPath}}/infrastructure/ratelimiter/memorylimiter"
+{{- if .SpecMode}}
+	"{{.FrameworkPath}}/infrastructure/database/sqlite/moderncdb"
+{{- else}}
+	"{{.FrameworkPath}}/infrastructure/database/postgres/pgxdb"
+{{- end}}
+	"{{.FrameworkPath}}/sdk/logger"
+	"{{.FrameworkPath}}/sdk/web"
+	"{{.FrameworkPath}}/workshop/testing/testauth"
 	"{{.FrameworkPath}}/workshop/testing/testhttp"
+{{- if .SpecMode}}
+	"{{.FrameworkPath}}/workshop/testing/testsqlite"
+{{- else}}
+	"{{.FrameworkPath}}/workshop/testing/testpgx"
+{{- end}}
 )
 
-// setupSecurityServer boots the app stack WITH authentication enabled and
-// returns a client pointed at it. The generated enforcement probes skip
-// (loudly) while this returns nil — wire your authenticated test server
-// here to activate them.
+// setupSecurityServer boots the full HTTP stack for {{.EntityName}} WITH the
+// real authentication/authorization middleware (via testauth), so the
+// generated probes exercise enforcement. Edit it if your routes need a
+// different auth setup.
 func setupSecurityServer(t *testing.T) *testhttp.Client {
 	t.Helper()
-	// TODO: boot your authenticated stack (e.g. via workshop/testing/testserver)
-	// and return testhttp.New(server.URL).
-	return nil
+
+	if testing.Short() {
+		t.Skip("skipping security test")
+	}
+
+	ctx := context.Background()
+{{- if .SpecMode}}
+	db := testsqlite.SetupTestSQLite(t, ctx, testsqlite.WithMigrations(migrateSecurityDB))
+	store, err := {{.StorePkg}}.NewStore(db.Querier(), db.Dialect(), {{.StorePkg}}.TxRunner(db.TxRunner()))
+	require.NoError(t, err)
+{{- else}}
+	db := testpgx.SetupTestPGX(t, ctx, testpgx.WithMigrations(migrateSecurityDB))
+	store := {{.StorePkg}}.NewStore(logger.NewNoop(), db.Pool)
+{{- end}}
+	repo := {{.RepoPkg}}.NewRepository({{.RepoPkg}}.NewCacheStore(store, nil))
+
+	limiter := ratelimiter.New(memorylimiter.New(), ratelimiter.NewDefaultResolver())
+	authenticator, _ := testauth.Authenticator("securitytest")
+	authorizer := testauth.Authorizer()
+
+	bridge := NewBridge(logger.NewNoop(), repo, limiter, authenticator, authorizer)
+
+	handler := web.NewWebHandler()
+	bridge.AddHttpRoutes(handler.Group(""))
+
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	return testhttp.New(srv.URL)
+}
+
+// migrateSecurityDB applies this project's migrations to the test database.
+{{- if .SpecMode}}
+func migrateSecurityDB(ctx context.Context, db *moderncdb.DB) error {
+	return moderncdb.RunMigrations(ctx, db, os.DirFS(securityProjectRoot()), "{{.MigrationsDir}}")
+}
+{{- else}}
+func migrateSecurityDB(ctx context.Context, pool *pgxdb.Pool) error {
+	return pgxdb.RunMigrations(ctx, pool, os.DirFS(securityProjectRoot()), "{{.MigrationsDir}}")
+}
+{{- end}}
+
+// securityProjectRoot walks up to the directory containing go.mod.
+func securityProjectRoot() string {
+	_, file, _, _ := runtime.Caller(0)
+	dir := filepath.Dir(file)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "."
+		}
+		dir = parent
+	}
 }
 `

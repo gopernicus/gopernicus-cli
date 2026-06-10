@@ -118,7 +118,7 @@ func GenerateBridge(resolved *ResolvedFile, domainName, modulePath, projectRoot 
 		return false, fmt.Errorf("bridge validation tests: %w", err)
 	}
 
-	if err := GenerateBridgeSecurity(data, bridgeDir, opts); err != nil {
+	if err := GenerateBridgeSecurity(data, resolved, bridgeDir, modulePath, hostDB, hostSpecMode, opts); err != nil {
 		return false, fmt.Errorf("bridge security tests: %w", err)
 	}
 

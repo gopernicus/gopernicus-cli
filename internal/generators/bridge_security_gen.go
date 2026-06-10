@@ -23,6 +23,15 @@ type BridgeSecurityData struct {
 	EntityName    string
 	FrameworkPath string
 	Routes        []SecurityRoute
+
+	// Stack wiring for the setupSecurityServer bootstrap: store/repo
+	// packages, store mode, and the migrations dir to apply.
+	SpecMode      bool
+	RepoPkg       string
+	RepoImport    string
+	StorePkg      string
+	StoreImport   string
+	MigrationsDir string
 }
 
 // GenerateBridgeSecurity emits auth-enforcement probes (P1) for every route
@@ -30,10 +39,10 @@ type BridgeSecurityData struct {
 // setupSecurityServer bootstrap — until the project wires its authenticated
 // stack, the probes skip loudly rather than fake a pass. Entities without
 // authenticated routes get nothing (stale files removed).
-func GenerateBridgeSecurity(data BridgeTemplateData, bridgeDir string, opts Options) error {
+func GenerateBridgeSecurity(data BridgeTemplateData, resolved *ResolvedFile, bridgeDir, modulePath, hostDB string, specMode bool, opts Options) error {
 	path := filepath.Join(bridgeDir, "generated_security_test.go")
 
-	sec := buildBridgeSecurityData(data)
+	sec := buildBridgeSecurityData(data, resolved, modulePath, hostDB, specMode)
 	if len(sec.Routes) == 0 {
 		if fileExists(path) && !opts.DryRun {
 			if err := os.Remove(path); err != nil {
@@ -58,11 +67,24 @@ func GenerateBridgeSecurity(data BridgeTemplateData, bridgeDir string, opts Opti
 	return nil
 }
 
-func buildBridgeSecurityData(data BridgeTemplateData) BridgeSecurityData {
+func buildBridgeSecurityData(data BridgeTemplateData, resolved *ResolvedFile, modulePath, hostDB string, specMode bool) BridgeSecurityData {
+	storeSuffix := "pgx"
+	if specMode {
+		storeSuffix = specStorePackageSuffix
+	}
+	storePkg := StorePackage(resolved.TableName, storeSuffix)
+
 	sec := BridgeSecurityData{
 		BridgePackage: data.BridgePackage,
 		EntityName:    data.EntityName,
 		FrameworkPath: gopernicusFrameworkPath,
+		SpecMode:      specMode,
+		RepoPkg:       resolved.PackageName,
+		RepoImport:    modulePath + "/core/repositories/" + resolved.DomainName + "/" + resolved.PackageName,
+		StorePkg:      storePkg,
+		StoreImport: modulePath + "/core/repositories/" + resolved.DomainName + "/" +
+			resolved.PackageName + "/" + storePkg,
+		MigrationsDir: "workshop/migrations/" + hostDB,
 	}
 	for _, r := range data.Routes {
 		authenticated := false

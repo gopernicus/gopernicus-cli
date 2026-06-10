@@ -23,9 +23,19 @@ func securityTestData(authenticated bool) BridgeTemplateData {
 	}
 }
 
+func securityTestResolved() *ResolvedFile {
+	return &ResolvedFile{
+		TableName:   "things",
+		DomainName:  "app",
+		PackageName: "things",
+		EntityName:  "Thing",
+		PKColumn:    "id",
+	}
+}
+
 func TestSecurityProbesEmitForAuthenticatedRoutes(t *testing.T) {
 	dir := t.TempDir()
-	err := GenerateBridgeSecurity(securityTestData(true), dir, Options{})
+	err := GenerateBridgeSecurity(securityTestData(true), securityTestResolved(), dir, "github.com/x/app", "primary", false, Options{})
 	if err != nil {
 		t.Fatalf("GenerateBridgeSecurity: %v", err)
 	}
@@ -62,7 +72,7 @@ func TestSecurityProbesAbsentWithoutAuthenticatedRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := GenerateBridgeSecurity(securityTestData(false), dir, Options{}); err != nil {
+	if err := GenerateBridgeSecurity(securityTestData(false), securityTestResolved(), dir, "github.com/x/app", "primary", false, Options{}); err != nil {
 		t.Fatalf("GenerateBridgeSecurity: %v", err)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
