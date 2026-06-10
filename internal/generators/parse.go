@@ -30,7 +30,7 @@ func ParseString(input string) (*File, error) {
 		filterAnnotations map[string]string // @filter:name -> spec
 		typeAnnotations   map[string]string // @type:param_name -> go_type
 		sqlLines          []string
-		lastAnnotationKey string            // tracks last annotation for continuation lines
+		lastAnnotationKey string // tracks last annotation for continuation lines
 	)
 
 	// appendContinuation appends a pipe continuation to the last annotation value.
@@ -105,27 +105,27 @@ func ParseString(input string) (*File, error) {
 		hasSearch := strings.Contains(sql, "$search")
 
 		qb := QueryBlock{
-			Name:           strings.TrimSpace(currentName),
-			Annotations:    annotations,
-			SQL:            sql,
-			Type:           detectQueryType(sql),
-			Params:         extractParams(sql),
-			Filters:        filters,
-			HasFilters:     hasFilters,
-			HasSearch:      hasSearch,
-			HasFields:      strings.Contains(sql, "$fields"),
-			HasValues:      strings.Contains(sql, "$values"),
-			HasOrder:       strings.Contains(sql, "$order"),
-			HasLimit:       strings.Contains(sql, "$limit"),
-			ReturnsRows:    isReturning(sql),
-			OrderSpec:      orderSpec,
-			LimitSpec:      limitSpec,
-			SearchSpec:     searchSpec,
-			CacheSpec:      cacheSpec,
-			EventType:      eventType,
-			EventOutbox:    eventOutbox,
-			TypeHints:       typeHints,
-			ScanOverride:   scanOverride,
+			Name:         strings.TrimSpace(currentName),
+			Annotations:  annotations,
+			SQL:          sql,
+			Type:         detectQueryType(sql),
+			Params:       extractParams(sql),
+			Filters:      filters,
+			HasFilters:   hasFilters,
+			HasSearch:    hasSearch,
+			HasFields:    strings.Contains(sql, "$fields"),
+			HasValues:    strings.Contains(sql, "$values"),
+			HasOrder:     strings.Contains(sql, "$order"),
+			HasLimit:     strings.Contains(sql, "$limit"),
+			ReturnsRows:  isReturning(sql),
+			OrderSpec:    orderSpec,
+			LimitSpec:    limitSpec,
+			SearchSpec:   searchSpec,
+			CacheSpec:    cacheSpec,
+			EventType:    eventType,
+			EventOutbox:  eventOutbox,
+			TypeHints:    typeHints,
+			ScanOverride: scanOverride,
 		}
 		f.Queries = append(f.Queries, qb)
 		currentName = ""
@@ -177,6 +177,7 @@ func ParseString(input string) (*File, error) {
 					switch key {
 					case "database":
 						f.Database = val
+						f.DatabaseExplicit = true
 					default:
 						if f.FileAnnotations == nil {
 							f.FileAnnotations = make(map[string]string)

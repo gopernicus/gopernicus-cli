@@ -135,6 +135,19 @@ func StoreDir(domainName, tableName, driverSuffix, outputDir string) string {
 	return filepath.Join(outputDir, "core", "repositories", domainName, pkg, pkg+driverSuffix)
 }
 
+// DBExportName returns the exported identifier suffix for a database name,
+// e.g. "primary" → "Primary", "other-db" → "OtherDb". Used for the
+// per-database NewRepositories<Db> composite constructors.
+func DBExportName(dbName string) string {
+	return ToPascalCase(strings.ReplaceAll(dbName, "-", "_"))
+}
+
+// DBCompositeFileName returns the per-database composite file name,
+// e.g. "primary" → "generated_composite_primary.go".
+func DBCompositeFileName(dbName string) string {
+	return "generated_composite_" + strings.ToLower(strings.ReplaceAll(dbName, "-", "_")) + ".go"
+}
+
 // BridgePackage returns the Go package name for an entity's HTTP bridge.
 func BridgePackage(tableName string) string {
 	return ToPackageName(tableName) + "bridge"

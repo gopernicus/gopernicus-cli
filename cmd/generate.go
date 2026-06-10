@@ -15,8 +15,12 @@ func init() {
 		Short: "Run code generators from queries.sql files",
 		Long: `Run code generators from queries.sql files.
 
-Scans core/repositories/ for queries.sql files and generates Go code by
-cross-referencing with reflected schema (from 'gopernicus db reflect').
+Generates Go code by cross-referencing queries.sql files with reflected
+schema (from 'gopernicus db reflect'). When any database in gopernicus.yml
+declares domains (databases.<name>.domains), that mapping is the binding
+source and generation iterates database×domain×entity — entities may be
+hosted by more than one database. Otherwise core/repositories/ is scanned
+and each queries.sql binds via its @database: annotation.
 
 Regenerated files (generated.go) are always overwritten.
 Bootstrapped files (model.go, repository.go, store.go) are created once

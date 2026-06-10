@@ -36,7 +36,8 @@ type CacheTemplateData struct {
 	FrameworkPath string // gopernicus framework module path (for infra cache import)
 	PackageName   string
 	EntityName    string
-	KeyPrefix     string // cache key prefix, e.g. "users"
+	KeyPrefix     string // cache key prefix, e.g. "auth:users"
+	MultiHomed    bool   // entity hosted by >1 database — emit NewCacheStoreWithKeyPrefix
 	CachedMethods []CachedMethod
 	WriteMethods  []WriteMethod
 }
@@ -44,11 +45,18 @@ type CacheTemplateData struct {
 // GenerateCache produces cache layer files for a repository.
 // Always generates the cache wrapper (even with no @cache annotations) so
 // that wiring is consistent and adding caching later is just a regenerate.
-func GenerateCache(resolved *ResolvedFile, repoDir string, opts Options) (bool, error) {
+//
+// multiHomed is true when the entity is hosted by more than one database
+// (nested manifest shape). The generated file then also exposes
+// NewCacheStoreWithKeyPrefix so each database's composite can qualify the
+// cache key prefix with its database name and avoid Redis collisions.
+// Single-homed entities keep the current default prefix and constructor.
+func GenerateCache(resolved *ResolvedFile, repoDir string, multiHomed bool, opts Options) (bool, error) {
 	data, err := buildCacheData(resolved)
 	if err != nil {
 		return false, fmt.Errorf("cache: %w", err)
 	}
+	data.MultiHomed = multiHomed
 
 	type genFile struct {
 		name      string
@@ -93,8 +101,8 @@ func buildCacheData(resolved *ResolvedFile) (CacheTemplateData, error) {
 	data := CacheTemplateData{
 		FrameworkPath: gopernicusFrameworkPath,
 		PackageName:   RepoPackage(resolved.TableName),
-		EntityName:  resolved.EntityName,
-		KeyPrefix:   resolved.DomainName + ":" + resolved.TableName,
+		EntityName:    resolved.EntityName,
+		KeyPrefix:     resolved.DomainName + ":" + resolved.TableName,
 	}
 
 	// Build method signatures from resolved queries (reuse the repo method builder logic).

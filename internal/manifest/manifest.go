@@ -1,5 +1,46 @@
 // Package manifest handles reading and writing the gopernicus.yml project manifest.
 //
+// # Domain shapes: nested vs legacy
+//
+// Domains bind entities (tables) to databases. Two manifest shapes are
+// recognized:
+//
+// The nested shape declares domains under each database. It is the sole
+// binding source for generation when present — `@database:` annotations in
+// queries.sql are ignored (with a printed warning):
+//
+//	databases:
+//	  primary:
+//	    driver: postgres
+//	    domains:
+//	      auth: [users, sessions]
+//	      events: [event_outbox]
+//	  otherdb:
+//	    driver: sqlite
+//	    domains:
+//	      events: [event_outbox]   # same entity, second database — allowed
+//
+// The legacy shape declares a single top-level domains map; the database an
+// entity binds to comes from the `@database:` annotation in its queries.sql
+// (default "primary"):
+//
+//	domains:
+//	  auth: [users, sessions]
+//	databases:
+//	  primary:
+//	    driver: postgres
+//
+// The legacy shape applies only when no database declares domains. If any
+// database declares domains, the nested shape wins and the top-level key is
+// ignored (DomainShapeWarnings reports the conflict).
+//
+// Databases iterate in the canonical order returned by
+// DatabaseNamesPrimaryFirst: sorted names, except a database literally named
+// "primary" always sorts first. When an entity is declared under more than
+// one database, the first declaring database in that order is its canonical
+// database — its reflected schema snapshot drives all generation for the
+// entity.
+//
 // # Database driver and store mode
 //
 // Each database declares a driver, which selects both the connection adapter
@@ -99,6 +140,12 @@ type Manifest struct {
 	Databases         map[string]*DatabaseConfig `yaml:"databases,omitempty"`
 	Features          *FeaturesConfig            `yaml:"features,omitempty"`
 	Events            *EventsConfig              `yaml:"events,omitempty"`
+
+	// Domains is the legacy top-level domain→tables mapping, used together
+	// with @database: annotations in queries.sql to bind entities to
+	// databases. It applies only when no database declares its own domains;
+	// see the package doc for both shapes.
+	Domains map[string][]string `yaml:"domains,omitempty"`
 }
 
 // EventsConfig configures the event infrastructure for a gopernicus project.
@@ -270,6 +317,61 @@ func (m *Manifest) DatabaseNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// DatabaseNamesPrimaryFirst returns all configured database names in the
+// canonical iteration order: sorted, except a database literally named
+// "primary" always sorts first. Generation iterates databases in this order;
+// the first database that declares an entity is the entity's canonical
+// database.
+func (m *Manifest) DatabaseNamesPrimaryFirst() []string {
+	names := m.DatabaseNames()
+	for i, name := range names {
+		if name == "primary" && i != 0 {
+			copy(names[1:i+1], names[:i])
+			names[0] = "primary"
+			break
+		}
+	}
+	return names
+}
+
+// NestedDomainsDeclared reports whether any database declares a domains map.
+// When true, the nested shape (databases.<name>.domains) is the sole binding
+// source: the legacy top-level domains key and @database: annotations in
+// queries.sql are ignored.
+func (m *Manifest) NestedDomainsDeclared() bool {
+	for _, db := range m.Databases {
+		if db != nil && len(db.Domains) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// EffectiveDomains returns the domain→tables mapping that applies to the
+// named database: the database's own domains when the nested shape is in
+// use, otherwise the legacy top-level domains (shared by every database).
+func (m *Manifest) EffectiveDomains(dbName string) map[string][]string {
+	if m.NestedDomainsDeclared() {
+		if db := m.DatabaseOrDefault(dbName); db != nil {
+			return db.Domains
+		}
+		return nil
+	}
+	return m.Domains
+}
+
+// DomainShapeWarnings returns human-readable warnings about conflicting
+// domain declarations. Callers decide where to print them.
+func (m *Manifest) DomainShapeWarnings() []string {
+	if len(m.Domains) > 0 && m.NestedDomainsDeclared() {
+		return []string{
+			"gopernicus.yml declares both a top-level `domains:` key and `databases.<name>.domains`; " +
+				"the nested shape is the sole binding source and the top-level key is ignored",
+		}
+	}
+	return nil
 }
 
 // Load reads gopernicus.yml from the given project root.

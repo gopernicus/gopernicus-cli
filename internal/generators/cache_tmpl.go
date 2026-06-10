@@ -56,6 +56,23 @@ func NewCacheStore(store Storer, c *cache.Cache) *CacheStore {
 		config: DefaultCacheConfig(),
 	}
 }
+{{- if .MultiHomed}}
+
+// NewCacheStoreWithKeyPrefix creates a CacheStore whose cache keys use the
+// given prefix instead of the default. This entity is hosted by more than
+// one database, so each database's generated composite passes a prefix
+// qualified with its database name (e.g. "primary:{{.KeyPrefix}}") to keep
+// entries from colliding in a shared cache.
+func NewCacheStoreWithKeyPrefix(store Storer, c *cache.Cache, keyPrefix string) *CacheStore {
+	config := DefaultCacheConfig()
+	config.KeyPrefix = keyPrefix
+	return &CacheStore{
+		Storer: store,
+		cache:  c,
+		config: config,
+	}
+}
+{{- end}}
 
 {{- if .CachedMethods}}
 // =============================================================================

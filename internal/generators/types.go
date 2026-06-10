@@ -13,6 +13,11 @@ type File struct {
 	// Database is the database config name (from @database, default: "primary").
 	Database string
 
+	// DatabaseExplicit is true when the file carries an @database: annotation.
+	// When the manifest uses the nested domain shape (databases.<name>.domains)
+	// the annotation is ignored and the caller prints a warning.
+	DatabaseExplicit bool
+
 	// Table is the primary table for this repo. Not parsed from the file —
 	// set externally by the caller (inferred from directory name or manifest).
 	Table string

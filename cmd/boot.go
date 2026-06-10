@@ -19,7 +19,8 @@ var bootCmd = &Command{
 	Short: "Bootstrap project components from reflected schema",
 	Long: `Bootstrap project components for one or all domains.
 
-Reads the "domains" mapping under each database in gopernicus.yml and
+Reads the "domains" mapping under each database in gopernicus.yml (or the
+legacy top-level "domains" key when no database declares its own) and
 scaffolds the corresponding files. Existing files are never overwritten.`,
 	Usage: "gopernicus boot <subcommand>",
 }
@@ -106,32 +107,40 @@ func runBootRepos(_ context.Context, args []string) error {
 	// Resolve framework source once for all tables.
 	fwSourceDir, _ := fwsource.ResolveDir() // empty on error; falls back to generic scaffold
 
+	for _, w := range m.DomainShapeWarnings() {
+		fmt.Printf("  warning: %s\n", w)
+	}
+
 	var count int
 	for _, db := range dbNames {
 		dbConf := m.DatabaseOrDefault(db)
 		if dbConf == nil {
 			continue
 		}
-		if len(dbConf.Domains) == 0 {
+		// Nested shape: each database's own domains. Legacy shape: the
+		// top-level domains map applies to every database (tables not in a
+		// database's reflected schema are skipped below).
+		dbDomains := m.EffectiveDomains(db)
+		if len(dbDomains) == 0 {
 			continue
 		}
 
 		// Determine which domains to process.
 		var domains []string
 		if domainFilter != "" {
-			if _, ok := dbConf.Domains[domainFilter]; !ok {
+			if _, ok := dbDomains[domainFilter]; !ok {
 				return fmt.Errorf("domain %q not found in database %q\n\nDefined domains: %s",
-					domainFilter, db, strings.Join(sortedKeys(dbConf.Domains), ", "))
+					domainFilter, db, strings.Join(sortedKeys(dbDomains), ", "))
 			}
 			domains = []string{domainFilter}
 		} else {
-			domains = sortedKeys(dbConf.Domains)
+			domains = sortedKeys(dbDomains)
 		}
 
 		schemaNames := dbConf.SchemasOrDefault()
 
 		for _, domain := range domains {
-			tables := dbConf.Domains[domain]
+			tables := dbDomains[domain]
 			sort.Strings(tables)
 
 			for _, tableName := range tables {

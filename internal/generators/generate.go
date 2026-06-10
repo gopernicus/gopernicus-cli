@@ -22,8 +22,11 @@ type Config struct {
 	ForceBootstrap bool
 }
 
-// Run executes code generation by scanning for queries.sql files and
-// cross-referencing them with reflected schema.
+// Run executes code generation, dispatching on the manifest's domain shape:
+// when any database declares domains (the nested shape,
+// databases.<name>.domains), the manifest is the sole binding source and
+// generation iterates database×domain×entity; otherwise the legacy path
+// scans for queries.sql files and binds each via its @database: annotation.
 func Run(cfg Config) error {
 	schemas, err := loadSchemas(cfg.ProjectRoot, cfg.Manifest)
 	if err != nil {
@@ -37,6 +40,27 @@ func Run(cfg Config) error {
 		)
 	}
 
+	modulePath, err := project.ModulePath(cfg.ProjectRoot)
+	if err != nil {
+		return fmt.Errorf("reading module path: %w", err)
+	}
+
+	opts := Options{DryRun: cfg.DryRun, Verbose: cfg.Verbose, ForceBootstrap: cfg.ForceBootstrap}
+
+	if cfg.DryRun {
+		fmt.Println("=== DRY RUN — no files written ===")
+	}
+
+	if cfg.Manifest.NestedDomainsDeclared() {
+		return runNested(cfg, schemas, modulePath, opts)
+	}
+	return runLegacy(cfg, schemas, modulePath, opts)
+}
+
+// runLegacy is the discovery-driven path: every queries.sql under
+// core/repositories/ is generated, bound to a database by its @database:
+// annotation (default "primary").
+func runLegacy(cfg Config, schemas map[string]*schema.ReflectedSchema, modulePath string, opts Options) error {
 	repoRoot := filepath.Join(cfg.ProjectRoot, "core", "repositories")
 	queryFiles, err := discoverQueryFiles(repoRoot, cfg.Domain)
 	if err != nil {
@@ -49,17 +73,6 @@ func Run(cfg Config) error {
 				"Run 'gopernicus new repo <domain/entity>' to scaffold a repository.",
 			repoRoot,
 		)
-	}
-
-	modulePath, err := project.ModulePath(cfg.ProjectRoot)
-	if err != nil {
-		return fmt.Errorf("reading module path: %w", err)
-	}
-
-	opts := Options{DryRun: cfg.DryRun, Verbose: cfg.Verbose, ForceBootstrap: cfg.ForceBootstrap}
-
-	if cfg.DryRun {
-		fmt.Println("=== DRY RUN — no files written ===")
 	}
 
 	// Collect entities per domain for composite generation.
@@ -85,42 +98,8 @@ func Run(cfg Config) error {
 		}
 
 		// Inject auth schema from bridge.yml into resolved file (for domain-level auth schema generation).
-		bridgeDir := BridgeDir(resolved.DomainName, resolved.TableName, cfg.ProjectRoot)
-		ymlPath := filepath.Join(bridgeDir, "bridge.yml")
-		if fileExists(ymlPath) {
-			yml, err := ParseBridgeYML(ymlPath)
-			if err == nil {
-				authEntity := BuildAuthSchemaEntityFromBridgeYML(yml, resolved.TableName)
-				if authEntity != nil {
-					// Convert back to the AuthRelation/AuthPermission format that the
-					// existing auth schema generator expects on ResolvedFile.
-					resolved.AuthRelations = nil
-					resolved.AuthPermissions = nil
-					for _, rel := range authEntity.Relations {
-						ar := AuthRelation{Name: rel.Name}
-						for _, s := range rel.AllowedSubjects {
-							ref := s.Type
-							if s.Relation != "" {
-								ref += "#" + s.Relation
-							}
-							ar.Subjects = append(ar.Subjects, ref)
-						}
-						resolved.AuthRelations = append(resolved.AuthRelations, ar)
-					}
-					for _, perm := range authEntity.Permissions {
-						ap := AuthPermission{Name: perm.Name}
-						for _, check := range perm.Checks {
-							if check.IsDirect {
-								ap.Rules = append(ap.Rules, check.Relation)
-							} else {
-								ap.Rules = append(ap.Rules, check.Relation+"->"+check.Permission)
-							}
-						}
-						resolved.AuthPermissions = append(resolved.AuthPermissions, ap)
-					}
-				}
-			}
-		}
+		injectBridgeAuthSchema(resolved, cfg.ProjectRoot)
+		ymlPath := bridgeYMLPath(resolved.DomainName, resolved.TableName, cfg.ProjectRoot)
 
 		domain := resolved.DomainName
 		if domain != "" {
@@ -175,27 +154,8 @@ func Run(cfg Config) error {
 	}
 
 	// Generate bridge composites and auth schemas for domains with bridge routes.
-	for domain, bridgeEntities := range domainBridgeEntities {
-		compositeDir := BridgeCompositeDir(domain, cfg.ProjectRoot)
-		data := BridgeCompositeTemplateData{
-			CompositePkg:  BridgeCompositePackage(domain),
-			DomainName:    domain,
-			ModulePath:    modulePath,
-			FrameworkPath: gopernicusFrameworkPath,
-			Entities:      bridgeEntities,
-			AuthEnabled:   authEnabled,
-		}
-		fmt.Printf("\n  %s/ (bridge composite)\n", BridgeCompositePackage(domain))
-		if err := GenerateBridgeComposite(data, compositeDir, opts); err != nil {
-			return fmt.Errorf("bridge composite %s: %w", domain, err)
-		}
-
-		// Generate auth schema in the bridge composite directory (auth is a bridge concern).
-		if gen, ok := authSchemaRegistry[authzProvider]; ok {
-			if err := gen(compositeDir, BridgeCompositePackage(domain), modulePath, domainResolvedFiles[domain], opts); err != nil {
-				return fmt.Errorf("auth schema %s: %w", domain, err)
-			}
-		}
+	if err := emitBridgeComposites(cfg, modulePath, authEnabled, authzProvider, domainBridgeEntities, domainResolvedFiles, opts); err != nil {
+		return err
 	}
 
 	// Generate test fixtures. The fixtures file is a single package across ALL
@@ -227,20 +187,110 @@ func Run(cfg Config) error {
 			allFixtureEntities = append(allFixtureEntities, BuildFixtureEntity(resolved, modulePath))
 		}
 	}
-	if len(allFixtureEntities) > 0 {
-		fixtureDir := filepath.Join(cfg.ProjectRoot, "workshop", "testing", "fixtures")
-		data := FixtureTemplateData{
-			ModulePath:    modulePath,
-			FrameworkPath: gopernicusFrameworkPath,
-			Entities:      allFixtureEntities,
-		}
-		fmt.Printf("\n  fixtures/ (test fixtures)\n")
-		if err := GenerateFixtures(data, fixtureDir, opts); err != nil {
-			return fmt.Errorf("fixtures: %w", err)
-		}
+	return emitFixtures(allFixtureEntities, cfg.ProjectRoot, modulePath, opts)
+}
+
+// injectBridgeAuthSchema overrides the resolved file's auth relations and
+// permissions with the entity's bridge.yml auth schema when one exists
+// (best-effort: a missing or unparseable bridge.yml leaves the
+// queries.sql-derived schema in place). The domain-level auth schema
+// generator reads these off the ResolvedFile.
+func injectBridgeAuthSchema(resolved *ResolvedFile, projectRoot string) {
+	ymlPath := bridgeYMLPath(resolved.DomainName, resolved.TableName, projectRoot)
+	if !fileExists(ymlPath) {
+		return
+	}
+	yml, err := ParseBridgeYML(ymlPath)
+	if err != nil {
+		return
+	}
+	authEntity := BuildAuthSchemaEntityFromBridgeYML(yml, resolved.TableName)
+	if authEntity == nil {
+		return
 	}
 
+	// Convert back to the AuthRelation/AuthPermission format that the
+	// existing auth schema generator expects on ResolvedFile.
+	resolved.AuthRelations = nil
+	resolved.AuthPermissions = nil
+	for _, rel := range authEntity.Relations {
+		ar := AuthRelation{Name: rel.Name}
+		for _, s := range rel.AllowedSubjects {
+			ref := s.Type
+			if s.Relation != "" {
+				ref += "#" + s.Relation
+			}
+			ar.Subjects = append(ar.Subjects, ref)
+		}
+		resolved.AuthRelations = append(resolved.AuthRelations, ar)
+	}
+	for _, perm := range authEntity.Permissions {
+		ap := AuthPermission{Name: perm.Name}
+		for _, check := range perm.Checks {
+			if check.IsDirect {
+				ap.Rules = append(ap.Rules, check.Relation)
+			} else {
+				ap.Rules = append(ap.Rules, check.Relation+"->"+check.Permission)
+			}
+		}
+		resolved.AuthPermissions = append(resolved.AuthPermissions, ap)
+	}
+}
+
+// bridgeYMLPath returns the path to an entity's bridge.yml.
+func bridgeYMLPath(domainName, tableName, projectRoot string) string {
+	return filepath.Join(BridgeDir(domainName, tableName, projectRoot), "bridge.yml")
+}
+
+// emitBridgeComposites generates bridge composites and auth schemas for
+// domains with bridge routes.
+func emitBridgeComposites(
+	cfg Config,
+	modulePath string,
+	authEnabled bool,
+	authzProvider manifest.Feature,
+	domainBridgeEntities map[string][]BridgeCompositeEntity,
+	domainResolvedFiles map[string][]*ResolvedFile,
+	opts Options,
+) error {
+	for domain, bridgeEntities := range domainBridgeEntities {
+		compositeDir := BridgeCompositeDir(domain, cfg.ProjectRoot)
+		data := BridgeCompositeTemplateData{
+			CompositePkg:  BridgeCompositePackage(domain),
+			DomainName:    domain,
+			ModulePath:    modulePath,
+			FrameworkPath: gopernicusFrameworkPath,
+			Entities:      bridgeEntities,
+			AuthEnabled:   authEnabled,
+		}
+		fmt.Printf("\n  %s/ (bridge composite)\n", BridgeCompositePackage(domain))
+		if err := GenerateBridgeComposite(data, compositeDir, opts); err != nil {
+			return fmt.Errorf("bridge composite %s: %w", domain, err)
+		}
+
+		// Generate auth schema in the bridge composite directory (auth is a bridge concern).
+		if gen, ok := authSchemaRegistry[authzProvider]; ok {
+			if err := gen(compositeDir, BridgeCompositePackage(domain), modulePath, domainResolvedFiles[domain], opts); err != nil {
+				return fmt.Errorf("auth schema %s: %w", domain, err)
+			}
+		}
+	}
 	return nil
+}
+
+// emitFixtures writes the cross-domain test fixtures package.
+func emitFixtures(entities []FixtureEntity, projectRoot, modulePath string, opts Options) error {
+	if len(entities) == 0 {
+		return nil
+	}
+	fixtureDir := filepath.Join(projectRoot, "workshop", "testing", "fixtures")
+	data := FixtureTemplateData{
+		ModulePath:    modulePath,
+		FrameworkPath: gopernicusFrameworkPath,
+		Entities:      entities,
+	}
+	fmt.Printf("\n  fixtures/ (test fixtures)\n")
+	return GenerateFixtures(data, fixtureDir, opts)
 }
 
 func generateFromQueryFile(
@@ -312,38 +362,13 @@ func generateFromQueryFile(
 		fmt.Printf("      note: integration test generation is pgx-only — skipped in spec store mode\n")
 
 	default: // manifest.StoreModePgx
-		if err := GeneratePgxStore(resolved, domainName, modulePath, projectRoot, opts); err != nil {
-			return nil, "", fmt.Errorf("pgxstore: %w", err)
-		}
-
-		// Generate pgxstore integration tests, unless the entity opted out via
-		// `-- @skip-integration-test` in queries.sql. When skipped, remove any
-		// previously generated test file so a stale copy doesn't linger and
-		// keep failing.
-		storeDir := StoreDir(domainName, resolved.TableName, "pgx", projectRoot)
-		if resolved.SkipIntegrationTest {
-			stalePath := filepath.Join(storeDir, "generated_test.go")
-			if fileExists(stalePath) && !opts.DryRun {
-				if err := os.Remove(stalePath); err != nil {
-					return nil, "", fmt.Errorf("remove stale generated_test.go: %w", err)
-				}
-				if opts.Verbose {
-					fmt.Printf("      removed %s (skip-integration-test)\n", stalePath)
-				}
-			}
-		} else {
-			testData, err := BuildIntegrationTestData(resolved, modulePath)
-			if err != nil {
-				return nil, "", fmt.Errorf("integration test data: %w", err)
-			}
-			if err := GenerateIntegrationTest(testData, storeDir, opts); err != nil {
-				return nil, "", fmt.Errorf("integration tests: %w", err)
-			}
+		if err := generatePgxStoreAndTests(resolved, domainName, modulePath, projectRoot, opts); err != nil {
+			return nil, "", err
 		}
 	}
 
 	// Generate cache layer (only if any @cache annotations exist).
-	if generated, err := GenerateCache(resolved, repoDir, opts); err != nil {
+	if generated, err := GenerateCache(resolved, repoDir, false, opts); err != nil {
 		return nil, "", fmt.Errorf("cache: %w", err)
 	} else if generated && opts.Verbose {
 		fmt.Printf("    generated cache layer\n")
@@ -357,6 +382,39 @@ func generateFromQueryFile(
 	}
 
 	return resolved, storeMode, nil
+}
+
+// generatePgxStoreAndTests generates the pgx store plus its integration
+// tests, unless the entity opted out via `-- @skip-integration-test` in
+// queries.sql. When skipped, any previously generated test file is removed so
+// a stale copy doesn't linger and keep failing.
+func generatePgxStoreAndTests(resolved *ResolvedFile, domainName, modulePath, projectRoot string, opts Options) error {
+	if err := GeneratePgxStore(resolved, domainName, modulePath, projectRoot, opts); err != nil {
+		return fmt.Errorf("pgxstore: %w", err)
+	}
+
+	storeDir := StoreDir(domainName, resolved.TableName, "pgx", projectRoot)
+	if resolved.SkipIntegrationTest {
+		stalePath := filepath.Join(storeDir, "generated_test.go")
+		if fileExists(stalePath) && !opts.DryRun {
+			if err := os.Remove(stalePath); err != nil {
+				return fmt.Errorf("remove stale generated_test.go: %w", err)
+			}
+			if opts.Verbose {
+				fmt.Printf("      removed %s (skip-integration-test)\n", stalePath)
+			}
+		}
+		return nil
+	}
+
+	testData, err := BuildIntegrationTestData(resolved, modulePath)
+	if err != nil {
+		return fmt.Errorf("integration test data: %w", err)
+	}
+	if err := GenerateIntegrationTest(testData, storeDir, opts); err != nil {
+		return fmt.Errorf("integration tests: %w", err)
+	}
+	return nil
 }
 
 // resolveForFixture parses and resolves a queries.sql file without running
