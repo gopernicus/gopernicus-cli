@@ -60,6 +60,13 @@ type StoreFilter struct {
 }
 
 // StoreMethod holds data for one pgxstore method implementation.
+// StoreWhereParam is one WHERE equality predicate of a generated update:
+// the db column (doubling as the named-arg key) and the Go parameter name.
+type StoreWhereParam struct {
+	Col   string
+	GoVar string
+}
+
 type StoreMethod struct {
 	FuncName string
 	Params   string
@@ -80,8 +87,9 @@ type StoreMethod struct {
 
 	// For update / update_returning.
 	UpdateFields        []StoreFieldInfo
-	WhereField          string
-	WhereGoVar          string
+	// WhereParams are the update's WHERE predicates, one per SQL @param —
+	// composite keys carry more than one (joined with AND).
+	WhereParams []StoreWhereParam
 	HasUpdatedAt        bool
 	UpdateReturningCols string
 
@@ -518,9 +526,11 @@ func buildUpdateStoreMethod(m *StoreMethod, rq ResolvedQuery, hasUpdatedAt bool)
 		})
 	}
 
-	if len(rq.Params) > 0 {
-		m.WhereField = rq.Params[0]
-		m.WhereGoVar = ToCamelCase(rq.Params[0])
+	for _, p := range rq.Params {
+		m.WhereParams = append(m.WhereParams, StoreWhereParam{
+			Col:   p,
+			GoVar: ToCamelCase(p),
+		})
 	}
 	// updated_at in @fields → caller may supply it, fall back to app-side UTC.
 	// updated_at excluded from @fields → no input field exists; always app-side.

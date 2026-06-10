@@ -248,7 +248,9 @@ func (s *Store) {{.FuncName}}({{.Params}}) {{.Returns}} {
 func (s *Store) {{.FuncName}}({{.Params}}) {{.Returns}} {
 	buf := bytes.NewBufferString("UPDATE {{$.QualifiedTable}} SET ")
 	args := pgx.NamedArgs{
-		"{{.WhereField}}": {{.WhereGoVar}},
+{{- range .WhereParams}}
+		"{{.Col}}": {{.GoVar}},
+{{- end}}
 	}
 	var setClauses []string
 {{- range .UpdateFields}}
@@ -277,7 +279,7 @@ func (s *Store) {{.FuncName}}({{.Params}}) {{.Returns}} {
 	}
 
 	buf.WriteString(strings.Join(setClauses, ", "))
-	buf.WriteString(" WHERE {{.WhereField}} = @{{.WhereField}}")
+	buf.WriteString(" WHERE {{range $i, $p := .WhereParams}}{{if $i}} AND {{end}}{{$p.Col}} = @{{$p.Col}}{{end}}")
 
 	result, err := s.db.Exec(ctx, buf.String(), args)
 	if err != nil {
@@ -295,7 +297,9 @@ func (s *Store) {{.FuncName}}({{.Params}}) {{.Returns}} {
 func (s *Store) {{.FuncName}}({{.Params}}) {{.Returns}} {
 	buf := bytes.NewBufferString("UPDATE {{$.QualifiedTable}} SET ")
 	args := pgx.NamedArgs{
-		"{{.WhereField}}": {{.WhereGoVar}},
+{{- range .WhereParams}}
+		"{{.Col}}": {{.GoVar}},
+{{- end}}
 	}
 	var setClauses []string
 {{- range .UpdateFields}}
@@ -328,7 +332,7 @@ func (s *Store) {{.FuncName}}({{.Params}}) {{.Returns}} {
 	}
 
 	buf.WriteString(strings.Join(setClauses, ", "))
-	buf.WriteString(" WHERE {{.WhereField}} = @{{.WhereField}}")
+	buf.WriteString(" WHERE {{range $i, $p := .WhereParams}}{{if $i}} AND {{end}}{{$p.Col}} = @{{$p.Col}}{{end}}")
 	buf.WriteString(" RETURNING {{.UpdateReturningCols}}")
 
 	rows, err := s.db.Query(ctx, buf.String(), args)
