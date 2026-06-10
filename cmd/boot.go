@@ -9,8 +9,7 @@ import (
 
 	"github.com/gopernicus/gopernicus-cli/internal/fwsource"
 	"github.com/gopernicus/gopernicus-cli/internal/generators"
-	"github.com/gopernicus/gopernicus-cli/internal/manifest"
-	"github.com/gopernicus/gopernicus-cli/internal/schema"
+	"github.com/gopernicus/gopernicus-cli/internal/scaffold"
 )
 
 var bootCmd = &Command{
@@ -111,16 +110,16 @@ func runBootRepos(_ context.Context, args []string) error {
 				}
 
 				// Find the table in the reflected schema.
-				table, _, err := findTableInSchemas(root, db, schemaNames, tableName)
+				table, _, err := scaffold.FindTableInSchemas(root, db, schemaNames, tableName)
 				if err != nil {
 					fmt.Printf("  skip %s/%s (not in reflected schema)\n", domain, tableName)
 					continue
 				}
 
-				if err := scaffoldRepoForTable(root, domain, table, fwSourceDir); err != nil {
+				if err := scaffold.RepoForTable(root, domain, table, fwSourceDir); err != nil {
 					return err
 				}
-				if err := scaffoldBridgeYMLForTable(root, domain, table, fwSourceDir); err != nil {
+				if err := scaffold.BridgeYMLForTable(root, domain, table, fwSourceDir); err != nil {
 					return err
 				}
 				count++
@@ -137,21 +136,6 @@ func runBootRepos(_ context.Context, args []string) error {
 		fmt.Println("  2. Run 'gopernicus generate' to generate code from queries")
 	}
 	return nil
-}
-
-// findTableInSchemas looks up a table across the given schemas for a database.
-func findTableInSchemas(root, dbName string, schemaNames []string, tableName string) (*schema.TableInfo, string, error) {
-	for _, s := range schemaNames {
-		jsonPath := filepath.Join(root, manifest.MigrationsDir(dbName), "_"+s+".json")
-		rs, err := schema.LoadJSON(jsonPath)
-		if err != nil {
-			continue
-		}
-		if t, ok := rs.Tables[tableName]; ok {
-			return t, s, nil
-		}
-	}
-	return nil, "", fmt.Errorf("table %q not found in reflected schema", tableName)
 }
 
 func sortedKeys(m map[string][]string) []string {
