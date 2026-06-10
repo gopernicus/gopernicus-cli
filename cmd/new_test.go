@@ -25,7 +25,7 @@ func TestScaffoldQueries_Users(t *testing.T) {
 		},
 	}
 
-	got := scaffoldQueries(table, "primary", "users", "user", ancestry{})
+	got := scaffoldQueries(table, "users", "user", ancestry{})
 	fmt.Println(got)
 
 	checks := map[string]string{
@@ -68,7 +68,7 @@ func TestScaffoldQueries_NoSoftDelete(t *testing.T) {
 		},
 	}
 
-	got := scaffoldQueries(table, "primary", "widgets", "widget", ancestry{})
+	got := scaffoldQueries(table, "widgets", "widget", ancestry{})
 
 	if strings.Contains(got, "record_state = 'deleted'") {
 		t.Error("should not have soft delete")
@@ -211,7 +211,7 @@ func TestScaffoldQueries_TenantScoped(t *testing.T) {
 		},
 	}
 	anc := detectAncestry(table)
-	got := scaffoldQueries(table, "primary", "projects", "project", anc)
+	got := scaffoldQueries(table, "projects", "project", anc)
 
 	checks := map[string]string{
 		"list tenant where":   "WHERE parent_tenant_id = @parent_tenant_id AND $conditions",
@@ -234,7 +234,7 @@ func TestScaffoldQueries_TenantScoped(t *testing.T) {
 
 func TestScaffoldQueries_NoAuthAnnotations(t *testing.T) {
 	table := &schema.TableInfo{TableName: "users"}
-	got := scaffoldQueries(table, "primary", "users", "user", ancestry{})
+	got := scaffoldQueries(table, "users", "user", ancestry{})
 
 	for _, s := range []string{"@auth.relation:", "@auth.permission:"} {
 		if strings.Contains(got, s) {

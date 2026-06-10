@@ -142,7 +142,7 @@ func runNested(cfg Config, schemas map[string]*schema.ReflectedSchema, modulePat
 		}
 
 		repoDir := filepath.Join(repoRoot, b.Domain, b.PkgName)
-		resolved, err := resolveNestedBinding(b, repoDir, schemas, true, opts.Verbose)
+		resolved, err := resolveNestedBinding(b, repoDir, schemas, true)
 		if err != nil {
 			return err
 		}
@@ -293,7 +293,7 @@ func runNested(cfg Config, schemas map[string]*schema.ReflectedSchema, modulePat
 				continue
 			}
 			repoDir := filepath.Join(repoRoot, b.Domain, b.PkgName)
-			resolved, err := resolveNestedBinding(b, repoDir, schemas, false, opts.Verbose)
+			resolved, err := resolveNestedBinding(b, repoDir, schemas, false)
 			if err != nil || resolved == nil {
 				continue // out-of-scope entities are best-effort for fixtures
 			}
@@ -329,15 +329,13 @@ func hostedStoreModes(dbs []string, dbModes map[string]manifest.StoreMode) []man
 // resolveNestedBinding parses and resolves a binding's queries.sql against
 // its canonical database's schema snapshot. When report is true, a missing
 // queries.sql is a hard error (the manifest explicitly declares the entity)
-// and skip notes/warnings are printed; when false, problems return (nil, nil)
-// or the parse/resolve error silently (used for out-of-scope fixture
-// collection).
+// and skip notes are printed; when false, problems return (nil, nil) or the
+// parse/resolve error silently (used for out-of-scope fixture collection).
 func resolveNestedBinding(
 	b *entityBinding,
 	repoDir string,
 	schemas map[string]*schema.ReflectedSchema,
 	report bool,
-	verbose bool,
 ) (*ResolvedFile, error) {
 	qfPath := filepath.Join(repoDir, "queries.sql")
 	if !fileExists(qfPath) {
@@ -354,10 +352,6 @@ func resolveNestedBinding(
 	qf, err := Parse(qfPath)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", qfPath, err)
-	}
-	if report && verbose && qf.DatabaseExplicit {
-		fmt.Printf("  note: %s: '-- @database: %s' is ignored (databases.<name>.domains is the binding source)\n",
-			qfPath, qf.Database)
 	}
 
 	canonical := b.DBs[0]

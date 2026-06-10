@@ -3,9 +3,7 @@
 // # Domain shape
 //
 // Domains bind entities (tables) to databases, declared under each database
-// (databases.<name>.domains). The manifest is the sole binding source —
-// `@database:` annotations in queries.sql are ignored (with a printed
-// warning):
+// (databases.<name>.domains). The manifest is the sole binding source:
 //
 //	databases:
 //	  primary:
@@ -320,7 +318,6 @@ func (m *Manifest) DatabaseNamesPrimaryFirst() []string {
 
 // NestedDomainsDeclared reports whether any database declares a domains map
 // (databases.<name>.domains) — the manifest's sole binding source.
-// @database: annotations in queries.sql are ignored.
 func (m *Manifest) NestedDomainsDeclared() bool {
 	for _, db := range m.Databases {
 		if db != nil && len(db.Domains) > 0 {

@@ -285,25 +285,19 @@ func TestRunNested_UnknownDomainFilter(t *testing.T) {
 	}
 }
 
-// TestParse_DatabaseExplicit pins the flag the nested path uses to warn about
-// ignored @database: annotations.
-func TestParse_DatabaseExplicit(t *testing.T) {
-	withAnnotation, err := ParseString("-- @database: primary\n\n-- @func: Get\nSELECT * FROM users WHERE user_id = @user_id;\n")
+// TestParse_DatabaseAnnotationTolerated pins that the retired @database:
+// annotation still parses (into FileAnnotations) so existing queries.sql
+// files keep working — it just binds nothing.
+func TestParse_DatabaseAnnotationTolerated(t *testing.T) {
+	f, err := ParseString("-- @database: primary\n\n-- @func: Get\nSELECT * FROM users WHERE user_id = @user_id;\n")
 	if err != nil {
 		t.Fatalf("parse with annotation: %v", err)
 	}
-	if !withAnnotation.DatabaseExplicit {
-		t.Error("DatabaseExplicit = false with @database annotation, want true")
+	if f.FileAnnotations["database"] != "primary" {
+		t.Errorf("FileAnnotations[database] = %q, want %q (annotation tolerated but unused)",
+			f.FileAnnotations["database"], "primary")
 	}
-
-	without, err := ParseString("-- @func: Get\nSELECT * FROM users WHERE user_id = @user_id;\n")
-	if err != nil {
-		t.Fatalf("parse without annotation: %v", err)
-	}
-	if without.DatabaseExplicit {
-		t.Error("DatabaseExplicit = true without @database annotation, want false")
-	}
-	if without.Database != "primary" {
-		t.Errorf("Database default = %q, want %q", without.Database, "primary")
+	if len(f.Queries) != 1 {
+		t.Fatalf("got %d queries, want 1", len(f.Queries))
 	}
 }

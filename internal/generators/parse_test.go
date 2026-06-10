@@ -57,9 +57,6 @@ func TestParseString_NewFormat(t *testing.T) {
 		t.Fatalf("ParseString: %v", err)
 	}
 
-	if f.Database != "primary" {
-		t.Errorf("Database = %q, want %q", f.Database, "primary")
-	}
 	if f.Table != "" {
 		t.Errorf("Table = %q, want empty", f.Table)
 	}
@@ -267,19 +264,6 @@ func TestParseString_EmptyFile(t *testing.T) {
 	}
 }
 
-func TestParseString_Defaults(t *testing.T) {
-	input := `-- @func: GetUser
-SELECT * FROM users WHERE user_id = @user_id;
-`
-	f, err := ParseString(input)
-	if err != nil {
-		t.Fatalf("ParseString: %v", err)
-	}
-	if f.Database != "primary" {
-		t.Errorf("Database = %q, want default %q", f.Database, "primary")
-	}
-}
-
 func TestParseString_FileAnnotations(t *testing.T) {
 	input := `-- @database: analytics
 -- @parent: tenant_id
@@ -291,11 +275,11 @@ SELECT count(*) FROM events WHERE tenant_id = @tenant_id;
 	if err != nil {
 		t.Fatalf("ParseString: %v", err)
 	}
-	if f.Database != "analytics" {
-		t.Errorf("Database = %q, want %q", f.Database, "analytics")
-	}
 	if f.FileAnnotations["parent"] != "tenant_id" {
 		t.Errorf("FileAnnotations[parent] = %q, want %q", f.FileAnnotations["parent"], "tenant_id")
+	}
+	if f.FileAnnotations["database"] != "analytics" {
+		t.Errorf("FileAnnotations[database] = %q, want %q (retired annotation, tolerated)", f.FileAnnotations["database"], "analytics")
 	}
 }
 

@@ -18,9 +18,7 @@ func Parse(path string) (*File, error) {
 
 // ParseString parses the contents of a queries.sql file.
 func ParseString(input string) (*File, error) {
-	f := &File{
-		Database: "primary",
-	}
+	f := &File{}
 
 	lines := strings.Split(input, "\n")
 	var (
@@ -174,16 +172,10 @@ func ParseString(input string) (*File, error) {
 				}
 
 				if !inQuery {
-					switch key {
-					case "database":
-						f.Database = val
-						f.DatabaseExplicit = true
-					default:
-						if f.FileAnnotations == nil {
-							f.FileAnnotations = make(map[string]string)
-						}
-						f.FileAnnotations[key] = val
+					if f.FileAnnotations == nil {
+						f.FileAnnotations = make(map[string]string)
 					}
+					f.FileAnnotations[key] = val
 				} else {
 					// @type:param_name go_type — explicit param type override.
 					if key == "type" && name != "" {

@@ -151,7 +151,7 @@ func runBootRepos(_ context.Context, args []string) error {
 					continue
 				}
 
-				if err := scaffoldRepoForTable(root, db, domain, table, fwSourceDir); err != nil {
+				if err := scaffoldRepoForTable(root, domain, table, fwSourceDir); err != nil {
 					return err
 				}
 				if err := scaffoldBridgeYMLForTable(root, domain, table, fwSourceDir); err != nil {

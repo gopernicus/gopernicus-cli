@@ -141,7 +141,7 @@ func runNewRepo(_ context.Context, args []string) error {
 		return scaffoldCustomRepo(root, domainName, entityName)
 	}
 
-	if err := scaffoldRepoForTable(root, dbName, domainName, table, fwSourceDir); err != nil {
+	if err := scaffoldRepoForTable(root, domainName, table, fwSourceDir); err != nil {
 		return err
 	}
 
@@ -185,7 +185,7 @@ func findTable(root string, m *manifest.Manifest, dbName, tableName, entityName 
 // scaffoldRepoForTable creates the repo directory and a queries.sql file
 // with default CRUD operations derived from the reflected table schema.
 // Go code (model.go, repository.go, store.go) is created by `gopernicus generate`.
-func scaffoldRepoForTable(root, dbName, domainName string, table *schema.TableInfo, fwSourceDir string) error {
+func scaffoldRepoForTable(root, domainName string, table *schema.TableInfo, fwSourceDir string) error {
 	tableName := table.TableName
 	entitySingular := generators.Singularize(tableName)
 	anc := detectAncestry(table)
@@ -218,7 +218,7 @@ func scaffoldRepoForTable(root, dbName, domainName string, table *schema.TableIn
 		if fileExists(queriesPath) {
 			fmt.Printf("  skip  %s/%s/queries.sql (already exists)\n", domainName, tableName)
 		} else {
-			content := scaffoldQueries(table, dbName, tableName, entitySingular, anc)
+			content := scaffoldQueries(table, tableName, entitySingular, anc)
 			if err := os.WriteFile(queriesPath, []byte(content), 0644); err != nil {
 				return fmt.Errorf("writing queries.sql: %w", err)
 			}
@@ -622,7 +622,7 @@ func fileExists(path string) bool {
 //   List, Get, Create, Update, SoftDelete, Archive, Restore, Delete
 func scaffoldQueries(
 	table *schema.TableInfo,
-	dbName, tableName, entitySingular string,
+	tableName, entitySingular string,
 	anc ancestry,
 ) string {
 	pkColumn := ""
@@ -705,7 +705,6 @@ func scaffoldQueries(
 	orderSpec := buildSpec("*", orderExclusions)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "-- @database: %s\n\n", dbName)
 
 	// ─── List ────────────────────────────────────────────────────────────
 	b.WriteString("-- @func: List\n")
