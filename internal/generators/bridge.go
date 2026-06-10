@@ -399,6 +399,10 @@ func collectPerQueryData(data *BridgeTemplateData, rq ResolvedQuery, seenList, s
 			if createPathParams[f.DBName] {
 				continue
 			}
+			// Server-set fields never come from the client (mass-assignment).
+			if isServerSetCreateField(f.DBName) {
+				continue
+			}
 			bf := toBridgeField(f)
 			cq.Fields = append(cq.Fields, bf)
 			updateImportFlags(data, bf)
@@ -418,6 +422,10 @@ func collectPerQueryData(data *BridgeTemplateData, rq ResolvedQuery, seenList, s
 
 		uq := BridgeUpdateQuery{FuncName: rq.FuncName}
 		for _, f := range rq.SetFields {
+			// Server-set fields never come from the client (mass-assignment).
+			if isServerSetUpdateField(f.DBName) {
+				continue
+			}
 			bf := toBridgeField(f)
 			bf.IsPointer = true
 			if strings.HasPrefix(bf.GoType, "*") {
@@ -430,6 +438,34 @@ func collectPerQueryData(data *BridgeTemplateData, rq ResolvedQuery, seenList, s
 		}
 		data.UpdateQueries = append(data.UpdateQueries, uq)
 	}
+}
+
+// ownershipColumns are creator/owner attribution columns: writable at
+// creation (until auth-context injection lands, attribution is creation
+// input) but never through a generic update — exposing them there lets any
+// client transfer ownership (SEC1).
+var ownershipColumns = map[string]bool{
+	"created_by":           true,
+	"creator_id":           true,
+	"creator_principal_id": true,
+	"owner_id":             true,
+	"owner_principal_id":   true,
+	"owned_by":             true,
+}
+
+// isServerSetCreateField reports whether a column must never appear in a
+// create request body. record_state belongs to the soft-delete state
+// machine — clients transition it through the lifecycle routes, never
+// directly (SEC1).
+func isServerSetCreateField(dbName string) bool {
+	return dbName == "record_state"
+}
+
+// isServerSetUpdateField reports whether a column must never appear in an
+// update request body: record_state (state machine) and ownership columns
+// (transfer requires an explicit, authorized flow).
+func isServerSetUpdateField(dbName string) bool {
+	return dbName == "record_state" || ownershipColumns[dbName]
 }
 
 // createFieldSignature returns a deterministic fingerprint of a create-request

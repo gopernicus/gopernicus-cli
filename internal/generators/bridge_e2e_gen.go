@@ -38,6 +38,10 @@ type BridgeE2EData struct {
 
 	HasDelete      bool
 	DeletePathExpr string // Go expr building the DELETE path from `id`
+
+	// HasRecordState gates the mass-assignment probe: a POST smuggling a
+	// record_state value must not control the stored state (SEC1/P5).
+	HasRecordState bool
 }
 
 // GenerateBridgeE2E emits light e2e tests for a bridged entity hosted by a
@@ -116,6 +120,12 @@ func buildBridgeE2EData(data BridgeTemplateData, resolved *ResolvedFile, moduleP
 			resolved.PackageName + "/" + StorePackage(resolved.TableName, specStorePackageSuffix),
 		MigrationsDir: "workshop/migrations/" + specDB,
 		PKJSON:        resolved.PKColumn,
+	}
+	for _, col := range resolved.AllColumns {
+		if col.Name == "record_state" {
+			e2e.HasRecordState = true
+			break
+		}
 	}
 
 	pkParam := "{" + resolved.PKColumn + "}"

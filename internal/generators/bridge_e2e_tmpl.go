@@ -14,6 +14,9 @@ package {{.BridgePackage}}
 
 import (
 	"context"
+{{- if .HasRecordState}}
+	"encoding/json"
+{{- end}}
 	"net/http/httptest"
 	"testing"
 
@@ -102,6 +105,23 @@ func TestE2E{{.EntityName}}Delete(t *testing.T) {
 {{- if .HasGet}}
 	client.Get(t, {{.GetPathExpr}}).RequireStatus(t, 404)
 {{- end}}
+}
+{{end}}{{if .HasRecordState}}
+func TestE2E{{.EntityName}}MassAssignment(t *testing.T) {
+	client := setupE2EServer(t)
+
+	// A client smuggling record_state into the create body must not control
+	// the stored state — the field is not part of the request model and the
+	// lifecycle routes own all transitions (SEC1/P5).
+	raw, err := json.Marshal(validCreate{{.EntityName}}Request())
+	require.NoError(t, err)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(raw, &body))
+	body["record_state"] = "zzz-forged-state"
+
+	resp := client.Post(t, "{{.CreatePath}}", body)
+	resp.RequireStatus(t, 201)
+	assert.NotEqual(t, "zzz-forged-state", resp.String(t, "record.record_state"))
 }
 {{end}}
 `
