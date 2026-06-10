@@ -135,7 +135,7 @@ func TestRunNested_SharedEntityAcrossModes(t *testing.T) {
 
 	pgxComposite := mustReadFile(t, filepath.Join(domainDir, "generated_composite_primary.go"))
 	for _, want := range []string{
-		"func NewRepositoriesPrimary(log *slog.Logger, db pgxdb.Querier, c *cache.Cache, bus events.Bus) *Repositories {",
+		"func NewRepositoriesPrimary(log *slog.Logger, db pgxdb.Querier, c *cache.Cache, bus gopevents.Bus) *Repositories {",
 		`eventoutbox.NewCacheStoreWithKeyPrefix(eventoutboxpgx.NewStore(log, db), c, "primary:events:event_outbox")`,
 	} {
 		if !strings.Contains(pgxComposite, want) {
@@ -145,7 +145,7 @@ func TestRunNested_SharedEntityAcrossModes(t *testing.T) {
 
 	specComposite := mustReadFile(t, filepath.Join(domainDir, "generated_composite_otherdb.go"))
 	for _, want := range []string{
-		"func NewRepositoriesOtherdb(log *slog.Logger, q crud.Querier, d crud.Dialect, inTx TxRunner, c *cache.Cache, bus events.Bus) (*Repositories, error) {",
+		"func NewRepositoriesOtherdb(log *slog.Logger, q crud.Querier, d crud.Dialect, inTx TxRunner, c *cache.Cache, bus gopevents.Bus) (*Repositories, error) {",
 		`eventoutbox.NewCacheStoreWithKeyPrefix(eventoutboxStore, c, "otherdb:events:event_outbox")`,
 	} {
 		if !strings.Contains(specComposite, want) {
@@ -220,7 +220,7 @@ func TestRunNested_SingleDatabaseKeepsClassicOutput(t *testing.T) {
 
 	domainDir := filepath.Join(root, "core", "repositories", "events")
 	composite := mustReadFile(t, filepath.Join(domainDir, "generated_composite.go"))
-	if !strings.Contains(composite, "func NewRepositories(log *slog.Logger, db pgxdb.Querier, c *cache.Cache, bus events.Bus) *Repositories {") {
+	if !strings.Contains(composite, "func NewRepositories(log *slog.Logger, db pgxdb.Querier, c *cache.Cache, bus gopevents.Bus) *Repositories {") {
 		t.Errorf("single-database composite changed shape\n--- output ---\n%s", composite)
 	}
 	if _, err := os.Stat(filepath.Join(domainDir, "generated_composite_primary.go")); !os.IsNotExist(err) {

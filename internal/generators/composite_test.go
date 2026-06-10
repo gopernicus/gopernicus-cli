@@ -49,13 +49,13 @@ func TestCompositeSpecRender(t *testing.T) {
 		`"github.com/example/app/core/repositories/auth/users/usersstore"`,
 		`"github.com/gopernicus/gopernicus/infrastructure/cache"`,
 		`"github.com/gopernicus/gopernicus/infrastructure/database/crud"`,
-		`"github.com/gopernicus/gopernicus/infrastructure/events"`,
+		`gopevents "github.com/gopernicus/gopernicus/infrastructure/events"`,
 
 		// Shared TxRunner, converted to each entity store's TxRunner.
 		"type TxRunner func(ctx context.Context, fn func(crud.Querier) error) error",
 
 		// Constructor: crud.Querier/Dialect params, error return.
-		"func NewRepositories(log *slog.Logger, q crud.Querier, d crud.Dialect, inTx TxRunner, c *cache.Cache, bus events.Bus) (*Repositories, error)",
+		"func NewRepositories(log *slog.Logger, q crud.Querier, d crud.Dialect, inTx TxRunner, c *cache.Cache, bus gopevents.Bus) (*Repositories, error)",
 
 		// Spec store construction with error handling per entity.
 		"usersStore, err := usersstore.NewStore(q, d, usersstore.TxRunner(inTx))",
@@ -130,7 +130,7 @@ import (
 
 	"github.com/gopernicus/gopernicus/infrastructure/cache"
 	"github.com/gopernicus/gopernicus/infrastructure/database/postgres/pgxdb"
-	"github.com/gopernicus/gopernicus/infrastructure/events"
+	gopevents "github.com/gopernicus/gopernicus/infrastructure/events"
 )
 
 // Repositories contains all repositories for the events domain.
@@ -141,7 +141,7 @@ type Repositories struct {
 // NewRepositories creates all repositories for the events domain.
 // db accepts *pgxdb.Pool for normal operations or a pgx.Tx for transactional workflows.
 // If c is nil, cache is a passthrough (no caching, falls through to database).
-func NewRepositories(log *slog.Logger, db pgxdb.Querier, c *cache.Cache, bus events.Bus) *Repositories {
+func NewRepositories(log *slog.Logger, db pgxdb.Querier, c *cache.Cache, bus gopevents.Bus) *Repositories {
 	return &Repositories{
 		EventOutbox: eventoutbox.NewRepository(
 			eventoutbox.NewCacheStore(eventoutboxpgx.NewStore(log, db), c),
@@ -167,7 +167,7 @@ import (
 
 	"github.com/gopernicus/gopernicus/infrastructure/cache"
 	"github.com/gopernicus/gopernicus/infrastructure/database/crud"
-	"github.com/gopernicus/gopernicus/infrastructure/events"
+	gopevents "github.com/gopernicus/gopernicus/infrastructure/events"
 )
 
 // TxRunner executes fn inside a transaction, providing a tx-scoped querier.
@@ -186,7 +186,7 @@ type Repositories struct {
 // (e.g. crud/pgxq or crud/sqliteq) and inTx runs a function inside a
 // transaction on the same connection.
 // If c is nil, cache is a passthrough (no caching, falls through to database).
-func NewRepositories(log *slog.Logger, q crud.Querier, d crud.Dialect, inTx TxRunner, c *cache.Cache, bus events.Bus) (*Repositories, error) {
+func NewRepositories(log *slog.Logger, q crud.Querier, d crud.Dialect, inTx TxRunner, c *cache.Cache, bus gopevents.Bus) (*Repositories, error) {
 	eventoutboxStore, err := eventoutboxstore.NewStore(q, d, eventoutboxstore.TxRunner(inTx))
 	if err != nil {
 		return nil, fmt.Errorf("eventoutbox store: %w", err)
@@ -293,7 +293,7 @@ func TestGenerateDomainComposites_MultiDatabase(t *testing.T) {
 		t.Fatalf("read generated_composite_primary.go: %v", err)
 	}
 	for _, want := range []string{
-		"func NewRepositoriesPrimary(log *slog.Logger, db pgxdb.Querier, c *cache.Cache, bus events.Bus) *Repositories {",
+		"func NewRepositoriesPrimary(log *slog.Logger, db pgxdb.Querier, c *cache.Cache, bus gopevents.Bus) *Repositories {",
 		`eventoutbox.NewCacheStoreWithKeyPrefix(eventoutboxpgx.NewStore(log, db), c, "primary:events:event_outbox")`,
 	} {
 		if !strings.Contains(string(pgxFile), want) {
@@ -311,7 +311,7 @@ func TestGenerateDomainComposites_MultiDatabase(t *testing.T) {
 		t.Fatalf("read generated_composite_otherdb.go: %v", err)
 	}
 	for _, want := range []string{
-		"func NewRepositoriesOtherdb(log *slog.Logger, q crud.Querier, d crud.Dialect, inTx TxRunner, c *cache.Cache, bus events.Bus) (*Repositories, error) {",
+		"func NewRepositoriesOtherdb(log *slog.Logger, q crud.Querier, d crud.Dialect, inTx TxRunner, c *cache.Cache, bus gopevents.Bus) (*Repositories, error) {",
 		`eventoutbox.NewCacheStoreWithKeyPrefix(eventoutboxStore, c, "otherdb:events:event_outbox")`,
 	} {
 		if !strings.Contains(string(specFile), want) {
@@ -349,7 +349,7 @@ func TestCompositePgxRender_Unchanged(t *testing.T) {
 	}
 	generated := string(raw)
 
-	if !strings.Contains(generated, "func NewRepositories(log *slog.Logger, db pgxdb.Querier, c *cache.Cache, bus events.Bus) *Repositories") {
+	if !strings.Contains(generated, "func NewRepositories(log *slog.Logger, db pgxdb.Querier, c *cache.Cache, bus gopevents.Bus) *Repositories") {
 		t.Errorf("pgx composite signature changed\n--- output ---\n%s", generated)
 	}
 	for _, banned := range []string{"crud.Querier", "crud.Dialect", "TxRunner"} {

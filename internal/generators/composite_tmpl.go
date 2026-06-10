@@ -15,7 +15,7 @@ import (
 	"{{.FrameworkPath}}/infrastructure/cache"
 	"{{.FrameworkPath}}/infrastructure/database/postgres/pgxdb"
 {{- if .HasEvents}}
-	"{{.FrameworkPath}}/infrastructure/events"
+	gopevents "{{.FrameworkPath}}/infrastructure/events"
 {{- end}}
 )
 {{if not .OmitTypes}}
@@ -35,7 +35,7 @@ type Repositories struct {
 // db accepts *pgxdb.Pool for normal operations or a pgx.Tx for transactional workflows.
 // If c is nil, cache is a passthrough (no caching, falls through to database).
 {{- if .HasEvents}}
-func NewRepositories{{.ConstructorSuffix}}(log *slog.Logger, db pgxdb.Querier, c *cache.Cache, bus events.Bus) *Repositories {
+func NewRepositories{{.ConstructorSuffix}}(log *slog.Logger, db pgxdb.Querier, c *cache.Cache, bus gopevents.Bus) *Repositories {
 {{- else}}
 func NewRepositories{{.ConstructorSuffix}}(log *slog.Logger, db pgxdb.Querier, c *cache.Cache) *Repositories {
 {{- end}}
@@ -80,7 +80,7 @@ import (
 	"{{.FrameworkPath}}/infrastructure/cache"
 	"{{.FrameworkPath}}/infrastructure/database/crud"
 {{- if .HasEvents}}
-	"{{.FrameworkPath}}/infrastructure/events"
+	gopevents "{{.FrameworkPath}}/infrastructure/events"
 {{- end}}
 )
 {{if not .OmitTypes}}
@@ -110,7 +110,7 @@ type Repositories struct {
 {{- end}}
 // If c is nil, cache is a passthrough (no caching, falls through to database).
 {{- if .HasEvents}}
-func NewRepositories{{.ConstructorSuffix}}(log *slog.Logger, q crud.Querier, d crud.Dialect, inTx TxRunner, c *cache.Cache, bus events.Bus) (*Repositories, error) {
+func NewRepositories{{.ConstructorSuffix}}(log *slog.Logger, q crud.Querier, d crud.Dialect, inTx TxRunner, c *cache.Cache, bus gopevents.Bus) (*Repositories, error) {
 {{- else}}
 func NewRepositories{{.ConstructorSuffix}}(log *slog.Logger, q crud.Querier, d crud.Dialect, inTx TxRunner, c *cache.Cache) (*Repositories, error) {
 {{- end}}
