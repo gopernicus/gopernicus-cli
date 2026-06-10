@@ -85,6 +85,9 @@ func GenerateAppScaffold(root string, data AppScaffoldData) error {
 		{".air.toml", airTomlRaw},
 		{"app/server/emails/layouts/transactional.html", emailLayoutHTMLRaw},
 		{"app/server/emails/layouts/transactional.txt", emailLayoutTXTRaw},
+		// emails.go declares `//go:embed templates/*`; without auth the dir
+		// would otherwise be empty and the embed fails the whole build.
+		{"app/server/emails/templates/.gitkeep", ""},
 	}
 	if data.HasAuthentication {
 		rawFiles = append(rawFiles,
