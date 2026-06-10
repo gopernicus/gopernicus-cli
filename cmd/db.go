@@ -380,6 +380,20 @@ func resolveDBURL(args []string, m *manifest.Manifest, root string) (string, err
 		)
 	}
 
+	// Databases ARE configured but the requested one (default "primary")
+	// wasn't found — point the user at --db rather than the legacy fallback's
+	// misleading "DATABASE_URL is not set".
+	if names := m.DatabaseNames(); len(names) > 0 {
+		requested := dbName
+		if requested == "" {
+			requested = "primary" // DatabaseOrDefault's implicit default
+		}
+		return "", fmt.Errorf(
+			"no database named %q in gopernicus.yml — specify one with --db <name> (available: %s)",
+			requested, strings.Join(names, ", "),
+		)
+	}
+
 	// Legacy fallback: no databases in manifest, try DATABASE_URL directly.
 	return envCfg.Require("DATABASE_URL")
 }

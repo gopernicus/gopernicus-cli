@@ -29,6 +29,28 @@ func GenerateBridge(resolved *ResolvedFile, domainName, modulePath, projectRoot 
 		return false, err
 	}
 
+	// Fail early with a clear message when a route asks for auth middleware
+	// but the project has no authentication feature — otherwise the
+	// generated bridge references an authenticator/authorizer field that
+	// only exists in auth-enabled output, surfacing as an opaque compile
+	// error far from its cause.
+	if !authEnabled {
+		for _, route := range yml.Routes {
+			for _, mw := range route.Middleware {
+				if mw.Authenticate != "" {
+					return false, fmt.Errorf(
+						"bridge.yml %s/%s: route %q uses authenticate: but the project has no authentication feature — add it to features in gopernicus.yml or remove the middleware",
+						domainName, resolved.TableName, route.Func)
+				}
+				if mw.Authorize != nil {
+					return false, fmt.Errorf(
+						"bridge.yml %s/%s: route %q uses authorize: but the project has no authentication feature — add it to features in gopernicus.yml or remove the middleware",
+						domainName, resolved.TableName, route.Func)
+				}
+			}
+		}
+	}
+
 	// An empty `routes:` block is a valid configuration: a domain may
 	// expose only custom (non-generated) handlers from routes.go. We still
 	// regenerate the bootstrap + generated stub so addGeneratedRoutes /
