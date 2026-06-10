@@ -162,6 +162,18 @@ func runInit(_ context.Context, args []string) error {
 		fmt.Printf("  warning: go mod tidy failed: %v\n", err)
 	}
 
+	// Generate the feature repositories' code, tests, and fixtures from the
+	// copied queries.sql + reflected schema, so the project is complete out
+	// of the box. Best-effort: a failure here leaves a valid scaffold the
+	// user can regenerate manually, so it must not fail init.
+	if opts.features.any() {
+		fmt.Printf("  → generating repositories\n")
+		if err := runInitGenerate(target); err != nil {
+			fmt.Printf("  warning: generation skipped (%v)\n", err)
+			fmt.Printf("           run 'gopernicus generate' after 'db reflect' to populate tests/fixtures\n")
+		}
+	}
+
 	fmt.Println()
 	fmt.Printf("  ✓ created %s\n\n", opts.projectName)
 	fmt.Printf("  cd %s\n", opts.projectName)
@@ -779,6 +791,20 @@ func applyFeatureSelection(m *manifest.Manifest, features featureSelection) {
 	}
 }
 
+// runInitGenerate runs code generation over a freshly-scaffolded project,
+// using the copied queries.sql + reflected schema. Kept quiet (no verbose
+// per-file output) so it reads as a single init step.
+func runInitGenerate(target string) error {
+	m, err := manifest.Load(target)
+	if err != nil {
+		return fmt.Errorf("loading manifest: %w", err)
+	}
+	return generators.Run(generators.Config{
+		ProjectRoot: target,
+		Manifest:    m,
+	})
+}
+
 // copyFeatureAssets copies migrations, core repositories, and bridge
 // repositories from the gopernicus framework source into the new project.
 // Go files have their import paths rewritten from the gopernicus module to
@@ -828,6 +854,20 @@ func copyFeatureAssets(target, modulePath, projectName, fwVersion string, featur
 		fmt.Printf("  → copying %s migration\n", mig.name)
 		if err := copyFile(src, dst); err != nil {
 			return fmt.Errorf("copying %s migration: %w", mig.name, err)
+		}
+	}
+
+	// Copy the reflected schema (_public.json) so 'gopernicus generate' can
+	// regenerate the feature repositories' tests/fixtures offline — without
+	// the user first standing up a database and running 'db reflect'.
+	for _, art := range []string{"_public.json", "_public.sql"} {
+		src := filepath.Join(source, "workshop", "migrations", "primary", art)
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		dst := filepath.Join(target, manifest.MigrationsDir("primary"), art)
+		if err := copyFile(src, dst); err != nil {
+			return fmt.Errorf("copying reflected schema %s: %w", art, err)
 		}
 	}
 
