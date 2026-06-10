@@ -24,6 +24,7 @@ func TestTemplatesParse(t *testing.T) {
 		"singularize":       dummy,
 		"join":              dummy,
 		"positionalArgs":    dummy,
+		"questionArgs":      dummy,
 		"add":               dummy,
 		"insertCols":        dummy,
 		"selectCols":        dummy,

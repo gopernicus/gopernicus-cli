@@ -1,9 +1,13 @@
 package generators
 
-// gopernicusFrameworkPath is the canonical module path for the gopernicus framework.
+// FrameworkModulePath is the canonical module path for the gopernicus framework.
 // Framework packages (sdk, bridge/transit, core/auth, infrastructure) always use this
 // path regardless of the project module path.
-const gopernicusFrameworkPath = "github.com/gopernicus/gopernicus"
+const FrameworkModulePath = "github.com/gopernicus/gopernicus"
+
+// gopernicusFrameworkPath aliases FrameworkModulePath for the generators'
+// internal call sites.
+const gopernicusFrameworkPath = FrameworkModulePath
 
 // BridgeTemplateData holds all data needed for bridge template rendering.
 type BridgeTemplateData struct {

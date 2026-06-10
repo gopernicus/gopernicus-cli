@@ -93,6 +93,7 @@ type FixtureField struct {
 type FixtureTemplateData struct {
 	ModulePath    string
 	FrameworkPath string // gopernicus framework module path (for sdk, infra imports)
+	SpecMode      bool   // sqlite/spec fixtures (testsqlite, ? placeholders) vs pgx
 	Entities      []FixtureEntity
 	Imports       []string // deduplicated extra imports
 	NeedsTime     bool     // "time" is among Imports — gates the usage guard
@@ -447,14 +448,16 @@ func computeTransitiveExternalParams(entities []FixtureEntity) {
 
 // GenerateFixtures produces the test fixtures file for all entities in a domain.
 func GenerateFixtures(data FixtureTemplateData, fixtureDir string, opts Options) error {
-	return generateFixturesWith(data, fixtureDir, fixtureGeneratedTemplate, fixtureBootstrapTemplate, opts)
+	data.SpecMode = false
+	return generateFixturesWith(data, fixtureDir, opts)
 }
 
 // GenerateSpecFixtures produces the sqlite-flavored fixtures package for
 // spec-store entities: testsqlite handle, ? placeholders, datetime('now').
 func GenerateSpecFixtures(data FixtureTemplateData, fixtureDir string, opts Options) error {
 	specEncodeTimeDefaults(data.Entities)
-	return generateFixturesWith(data, fixtureDir, specFixtureGeneratedTemplate, specFixtureBootstrapTemplate, opts)
+	data.SpecMode = true
+	return generateFixturesWith(data, fixtureDir, opts)
 }
 
 // specEncodeTimeDefaults rewrites time-typed insert defaults to go through
@@ -476,7 +479,7 @@ func specEncodeTimeDefaults(entities []FixtureEntity) {
 	}
 }
 
-func generateFixturesWith(data FixtureTemplateData, fixtureDir, generatedTmpl, bootstrapTmpl string, opts Options) error {
+func generateFixturesWith(data FixtureTemplateData, fixtureDir string, opts Options) error {
 	if len(data.Entities) == 0 {
 		return nil
 	}
@@ -519,8 +522,8 @@ func generateFixturesWith(data FixtureTemplateData, fixtureDir, generatedTmpl, b
 	}
 
 	genFiles := []genFile{
-		{"generated.go", generatedTmpl, false},
-		{"fixtures.go", bootstrapTmpl, true},
+		{"generated.go", fixtureGeneratedTemplate, false},
+		{"fixtures.go", fixtureBootstrapTemplate, true},
 	}
 
 	for _, f := range genFiles {

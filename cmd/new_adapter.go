@@ -8,10 +8,11 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/gopernicus/gopernicus-cli/internal/generators"
 	"github.com/gopernicus/gopernicus-cli/internal/project"
 )
 
-const frameworkModule = "github.com/gopernicus/gopernicus"
+const frameworkModule = generators.FrameworkModulePath
 
 func init() {
 	newCmd.SubCommands = append(newCmd.SubCommands, &Command{

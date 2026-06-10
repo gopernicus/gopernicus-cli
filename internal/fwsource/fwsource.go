@@ -12,9 +12,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/gopernicus/gopernicus-cli/internal/generators"
 )
 
-const gopernicusModule = "github.com/gopernicus/gopernicus"
+const gopernicusModule = generators.FrameworkModulePath
 
 // modDownloadResult is the subset of `go mod download -json` output we need.
 type modDownloadResult struct {

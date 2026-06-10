@@ -218,7 +218,7 @@ func checkFrameworkDep(root string) check {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if strings.Contains(line, "github.com/gopernicus/gopernicus") {
+		if strings.Contains(line, generators.FrameworkModulePath) {
 			// Extract version from the require line.
 			parts := strings.Fields(line)
 			if len(parts) >= 2 {
@@ -230,6 +230,6 @@ func checkFrameworkDep(root string) check {
 	return check{
 		name:   "gopernicus framework",
 		passed: false,
-		detail: "not found in go.mod — run 'go get github.com/gopernicus/gopernicus@latest'",
+		detail: "not found in go.mod — run 'go get " + generators.FrameworkModulePath + "@latest'",
 	}
 }

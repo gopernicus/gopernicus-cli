@@ -36,10 +36,14 @@ type IntegrationTestMethod struct {
 	ReturnsEntity bool
 }
 
-// IntegrationTestData holds all data for rendering a pgxstore integration test.
+// IntegrationTestData holds all data for rendering a store integration test.
 type IntegrationTestData struct {
 	// FrameworkPath is the gopernicus framework module path (for sdk, testing imports).
 	FrameworkPath string
+
+	// SpecMode selects the test harness: spec → testsqlite + sqlitefixtures +
+	// NewStore(q, d, inTx); pgx → testpgx + fixtures + NewStore(log, pool).
+	SpecMode bool
 
 	// Package info
 	StorePkg   string // e.g. "userspgx"
@@ -334,18 +338,18 @@ func entityFieldIsPointer(resolved *ResolvedFile, dbName string) bool {
 
 // GenerateIntegrationTest produces the generated_test.go file for a pgxstore package.
 func GenerateIntegrationTest(data IntegrationTestData, storeDir string, opts Options) error {
-	return generateIntegrationTestWith(data, storeDir,
-		integrationTestGeneratedTemplate, integrationTestBootstrapTemplate, opts)
+	data.SpecMode = false
+	return generateIntegrationTestWith(data, storeDir, opts)
 }
 
 // GenerateSpecIntegrationTest produces the spec-store variant: testsqlite
 // harness, sqlitefixtures, NewStore(q, d, inTx).
 func GenerateSpecIntegrationTest(data IntegrationTestData, storeDir string, opts Options) error {
-	return generateIntegrationTestWith(data, storeDir,
-		specIntegrationTestGeneratedTemplate, specIntegrationTestBootstrapTemplate, opts)
+	data.SpecMode = true
+	return generateIntegrationTestWith(data, storeDir, opts)
 }
 
-func generateIntegrationTestWith(data IntegrationTestData, storeDir, generatedTmpl, bootstrapTmpl string, opts Options) error {
+func generateIntegrationTestWith(data IntegrationTestData, storeDir string, opts Options) error {
 	type genFile struct {
 		name      string
 		tmpl      string
@@ -353,8 +357,8 @@ func generateIntegrationTestWith(data IntegrationTestData, storeDir, generatedTm
 	}
 
 	genFiles := []genFile{
-		{"generated_test.go", generatedTmpl, false},
-		{"store_test.go", bootstrapTmpl, true},
+		{"generated_test.go", integrationTestGeneratedTemplate, false},
+		{"store_test.go", integrationTestBootstrapTemplate, true},
 	}
 
 	for _, f := range genFiles {

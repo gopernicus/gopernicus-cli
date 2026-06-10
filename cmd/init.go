@@ -795,7 +795,7 @@ func copyFeatureAssets(target, modulePath, projectName, fwVersion string, featur
 		return fmt.Errorf("resolving gopernicus source: %w", err)
 	}
 
-	const gopernicusModule = "github.com/gopernicus/gopernicus"
+	const gopernicusModule = generators.FrameworkModulePath
 
 	// Copy migrations.
 	type migration struct {
