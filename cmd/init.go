@@ -10,15 +10,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gopernicus/gopernicus-cli/internal/fwsource"
-	"github.com/gopernicus/gopernicus-cli/internal/generators"
-	"github.com/gopernicus/gopernicus-cli/internal/goversion"
-	"github.com/gopernicus/gopernicus-cli/internal/manifest"
+	"github.com/gopernicus/gopernicus/workshop/codegen/cli"
+	"github.com/gopernicus/gopernicus/workshop/codegen/fwsource"
+	"github.com/gopernicus/gopernicus/workshop/codegen/generators"
+	"github.com/gopernicus/gopernicus/workshop/codegen/goversion"
+	"github.com/gopernicus/gopernicus/workshop/codegen/manifest"
 	"github.com/gopernicus/gopernicus-cli/internal/tui"
 )
 
 func init() {
-	RegisterCommand(&Command{
+	cli.RegisterCommand(&cli.Command{
 		Name:  "init",
 		Short: "Bootstrap a new gopernicus project",
 		Long: `Bootstrap a new gopernicus project in a new directory.
@@ -68,15 +69,34 @@ func (f featureSelection) any() bool {
 	return f.Authentication || f.Authorization || f.Tenancy || f.EventOutbox || f.JobQueue
 }
 
+// enabledFor reports whether the feature with the given flag name
+// ("authentication", "authorization", "tenancy", "event-outbox", "job-queue")
+// is selected.
+func (f featureSelection) enabledFor(name string) bool {
+	switch name {
+	case "authentication":
+		return f.Authentication
+	case "authorization":
+		return f.Authorization
+	case "tenancy":
+		return f.Tenancy
+	case "event-outbox":
+		return f.EventOutbox
+	case "job-queue":
+		return f.JobQueue
+	}
+	return false
+}
+
 // infrastructureSelection tracks which infrastructure adapters to bootstrap.
 type infrastructureSelection struct {
-	HasRedis       bool // Redis client (enables redis cache; required for Redis Streams)
+	HasRedis        bool // Redis client (enables redis cache; required for Redis Streams)
 	HasRedisStreams bool // Redis Streams event bus backend
-	HasStorageDisk bool // Local disk file storage
-	HasStorageGCS  bool // Google Cloud Storage
-	HasStorageS3   bool // AWS S3 / compatible
-	HasSendGrid    bool // SendGrid email delivery
-	HasTelemetry   bool // Telemetry stack (Jaeger)
+	HasStorageDisk  bool // Local disk file storage
+	HasStorageGCS   bool // Google Cloud Storage
+	HasStorageS3    bool // AWS S3 / compatible
+	HasSendGrid     bool // SendGrid email delivery
+	HasTelemetry    bool // Telemetry stack (Jaeger)
 }
 
 // aiCompanionSelection tracks which AI coding assistant to bootstrap.
@@ -94,7 +114,7 @@ func defaultAICompanion() aiCompanionSelection {
 func defaultInfrastructure() infrastructureSelection {
 	return infrastructureSelection{
 		HasRedis:        true,
-		HasRedisStreams:  true,
+		HasRedisStreams: true,
 		HasStorageDisk:  true,
 		HasStorageGCS:   true,
 		HasSendGrid:     true,
@@ -152,14 +172,55 @@ func runInit(_ context.Context, args []string) error {
 		}
 	}
 
-	// Run go mod tidy to clean up dependencies.
+	// Pin the in-framework generator tool: `go tool gopernicus` then runs the
+	// exact generator that ships with the framework version the project links,
+	// so emitted code and runtime can never drift.
+	fmt.Printf("  → pinning the gopernicus tool\n")
+	toolEdit := exec.Command("go", "mod", "edit",
+		"-tool=github.com/gopernicus/gopernicus/workshop/gopernicus",
+	)
+	toolEdit.Dir = target
+	toolEdit.Stdout = os.Stdout
+	toolEdit.Stderr = os.Stderr
+	if err := toolEdit.Run(); err != nil {
+		return fmt.Errorf("go mod edit -tool: %w", err)
+	}
+
+	// Run go mod tidy to resolve the framework dependency and sums. The
+	// scaffolded server wiring imports satisfier packages that are emitted by
+	// the generate step below, so unresolvable project-internal imports are
+	// tolerated here (-e); the post-generation tidy below settles the module
+	// files once those packages exist.
 	fmt.Printf("  → running go mod tidy\n")
-	tidy := exec.Command("go", "mod", "tidy")
+	tidy := exec.Command("go", "mod", "tidy", "-e")
 	tidy.Dir = target
 	tidy.Stdout = os.Stdout
 	tidy.Stderr = os.Stderr
 	if err := tidy.Run(); err != nil {
 		fmt.Printf("  warning: go mod tidy failed: %v\n", err)
+	}
+
+	// Generate the feature repositories' code, tests, fixtures, and feature
+	// satisfiers from the framework-shipped specs + reflected schema, so the
+	// project is complete out of the box. Best-effort: a failure here leaves
+	// a valid scaffold the user can regenerate manually, so it must not fail
+	// init.
+	if opts.features.any() {
+		fmt.Printf("  → generating repositories\n")
+		if err := runInitGenerate(target); err != nil {
+			fmt.Printf("  warning: generation skipped (%v)\n", err)
+			fmt.Printf("           run 'gopernicus generate' after 'db reflect' to populate tests/fixtures\n")
+		}
+
+		// Final tidy now that generation has emitted the satisfier packages
+		// the server wiring imports.
+		finalTidy := exec.Command("go", "mod", "tidy")
+		finalTidy.Dir = target
+		finalTidy.Stdout = os.Stdout
+		finalTidy.Stderr = os.Stderr
+		if err := finalTidy.Run(); err != nil {
+			fmt.Printf("  warning: go mod tidy failed: %v\n", err)
+		}
 	}
 
 	fmt.Println()
@@ -383,62 +444,69 @@ func parseFeaturesFlag(value string) (featureSelection, error) {
 	return features, nil
 }
 
+// pickerScreen is one interactive multi-select screen: a title (also the
+// single category name), its items, and the selection flags each item name
+// sets when chosen.
+type pickerScreen struct {
+	Title string
+	Items []tui.PickerItem
+	Apply map[string][]*bool
+}
+
+// runPickerScreens shows each screen in order and applies selections to the
+// target flags. Returns an error when a screen fails or is cancelled.
+func runPickerScreens(screens []pickerScreen) error {
+	for _, s := range screens {
+		r, err := tui.RunPicker(s.Title, []tui.PickerCategory{
+			{Name: s.Title, Items: s.Items},
+		})
+		if err != nil {
+			return err
+		}
+		if r.Cancelled {
+			return fmt.Errorf("cancelled")
+		}
+		for _, name := range r.Selected {
+			for _, flag := range s.Apply[name] {
+				*flag = true
+			}
+		}
+	}
+	return nil
+}
+
 // runFeaturePicker shows per-screen interactive multi-selects for framework features.
 // Each category gets its own TUI screen.
 func runFeaturePicker() (featureSelection, error) {
-	// Screen 1: Framework Features
-	r1, err := tui.RunPicker("Framework Features", []tui.PickerCategory{
+	features := noFeatures()
+	screens := []pickerScreen{
 		{
-			Name: "Framework Features",
+			Title: "Framework Features",
 			Items: []tui.PickerItem{
 				{Name: "Authentication", Description: "users, sessions, OAuth, API keys", Selected: true},
 				{Name: "Authorization", Description: "ReBAC relationships, permissions", Selected: true},
 				{Name: "Tenancy", Description: "multi-tenant isolation, groups", Selected: true},
 			},
+			Apply: map[string][]*bool{
+				"Authentication": {&features.Authentication},
+				"Authorization":  {&features.Authorization},
+				"Tenancy":        {&features.Tenancy},
+			},
 		},
-	})
-	if err != nil {
-		return noFeatures(), err
-	}
-	if r1.Cancelled {
-		return noFeatures(), fmt.Errorf("cancelled")
-	}
-
-	// Screen 2: Event Infrastructure
-	r2, err := tui.RunPicker("Event Infrastructure", []tui.PickerCategory{
 		{
-			Name: "Event Infrastructure",
+			Title: "Event Infrastructure",
 			Items: []tui.PickerItem{
 				{Name: "Event Outbox", Description: "transactional outbox for atomic event delivery", Selected: true},
 				{Name: "Job Queue", Description: "durable deferred processing with retry and dead-lettering", Selected: true},
 			},
+			Apply: map[string][]*bool{
+				"Event Outbox": {&features.EventOutbox},
+				"Job Queue":    {&features.JobQueue},
+			},
 		},
-	})
-	if err != nil {
+	}
+	if err := runPickerScreens(screens); err != nil {
 		return noFeatures(), err
-	}
-	if r2.Cancelled {
-		return noFeatures(), fmt.Errorf("cancelled")
-	}
-
-	features := noFeatures()
-	for _, name := range r1.Selected {
-		switch name {
-		case "Authentication":
-			features.Authentication = true
-		case "Authorization":
-			features.Authorization = true
-		case "Tenancy":
-			features.Tenancy = true
-		}
-	}
-	for _, name := range r2.Selected {
-		switch name {
-		case "Event Outbox":
-			features.EventOutbox = true
-		case "Job Queue":
-			features.JobQueue = true
-		}
 	}
 	return features, nil
 }
@@ -446,144 +514,80 @@ func runFeaturePicker() (featureSelection, error) {
 // runInfraPicker shows per-screen interactive multi-selects for infrastructure adapters.
 // Each category gets its own TUI screen.
 func runInfraPicker() (infrastructureSelection, error) {
-	// Screen 1: Cache
-	r1, err := tui.RunPicker("Cache Backend", []tui.PickerCategory{
+	infra := infrastructureSelection{}
+	screens := []pickerScreen{
 		{
-			Name: "Cache Backend",
+			Title: "Cache Backend",
 			Items: []tui.PickerItem{
 				{Name: "Redis Cache", Description: "Redis-backed caching (recommended)", Selected: true},
 			},
+			Apply: map[string][]*bool{
+				"Redis Cache": {&infra.HasRedis},
+			},
 		},
-	})
-	if err != nil {
-		return defaultInfrastructure(), err
-	}
-	if r1.Cancelled {
-		return defaultInfrastructure(), fmt.Errorf("cancelled")
-	}
-
-	// Screen 2: Event Bus
-	r2, err := tui.RunPicker("Event Bus Backend", []tui.PickerCategory{
 		{
-			Name: "Event Bus Backend",
+			Title: "Event Bus Backend",
 			Items: []tui.PickerItem{
 				{Name: "Redis Streams", Description: "Durable event bus via Redis Streams", Selected: true},
 			},
+			Apply: map[string][]*bool{
+				// Redis Streams requires a Redis connection.
+				"Redis Streams": {&infra.HasRedisStreams, &infra.HasRedis},
+			},
 		},
-	})
-	if err != nil {
-		return defaultInfrastructure(), err
-	}
-	if r2.Cancelled {
-		return defaultInfrastructure(), fmt.Errorf("cancelled")
-	}
-
-	// Screen 3: File Storage
-	r3, err := tui.RunPicker("File Storage", []tui.PickerCategory{
 		{
-			Name: "File Storage",
+			Title: "File Storage",
 			Items: []tui.PickerItem{
 				{Name: "Disk Storage", Description: "Local filesystem storage", Selected: true},
 				{Name: "GCS", Description: "Google Cloud Storage", Selected: true},
 				{Name: "S3", Description: "AWS S3 / compatible object storage", Selected: false},
 			},
+			Apply: map[string][]*bool{
+				"Disk Storage": {&infra.HasStorageDisk},
+				"GCS":          {&infra.HasStorageGCS},
+				"S3":           {&infra.HasStorageS3},
+			},
 		},
-	})
-	if err != nil {
-		return defaultInfrastructure(), err
-	}
-	if r3.Cancelled {
-		return defaultInfrastructure(), fmt.Errorf("cancelled")
-	}
-
-	// Screen 4: Email
-	r4, err := tui.RunPicker("Email Delivery", []tui.PickerCategory{
 		{
-			Name: "Email Delivery",
+			Title: "Email Delivery",
 			Items: []tui.PickerItem{
 				{Name: "SendGrid", Description: "Production email delivery via SendGrid", Selected: true},
 			},
+			Apply: map[string][]*bool{
+				"SendGrid": {&infra.HasSendGrid},
+			},
 		},
-	})
-	if err != nil {
-		return defaultInfrastructure(), err
-	}
-	if r4.Cancelled {
-		return defaultInfrastructure(), fmt.Errorf("cancelled")
-	}
-
-	// Screen 5: Telemetry
-	r5, err := tui.RunPicker("Telemetry", []tui.PickerCategory{
 		{
-			Name: "Telemetry",
+			Title: "Telemetry",
 			Items: []tui.PickerItem{
 				{Name: "Jaeger", Description: "Distributed tracing via OpenTelemetry + Jaeger", Selected: true},
 			},
+			Apply: map[string][]*bool{
+				"Jaeger": {&infra.HasTelemetry},
+			},
 		},
-	})
-	if err != nil {
+	}
+	if err := runPickerScreens(screens); err != nil {
 		return defaultInfrastructure(), err
-	}
-	if r5.Cancelled {
-		return defaultInfrastructure(), fmt.Errorf("cancelled")
-	}
-
-	infra := infrastructureSelection{}
-	for _, name := range r1.Selected {
-		if name == "Redis Cache" {
-			infra.HasRedis = true
-		}
-	}
-	for _, name := range r2.Selected {
-		if name == "Redis Streams" {
-			infra.HasRedisStreams = true
-			infra.HasRedis = true // Redis Streams requires a Redis connection
-		}
-	}
-	for _, name := range r3.Selected {
-		switch name {
-		case "Disk Storage":
-			infra.HasStorageDisk = true
-		case "GCS":
-			infra.HasStorageGCS = true
-		case "S3":
-			infra.HasStorageS3 = true
-		}
-	}
-	for _, name := range r4.Selected {
-		if name == "SendGrid" {
-			infra.HasSendGrid = true
-		}
-	}
-	for _, name := range r5.Selected {
-		if name == "Jaeger" {
-			infra.HasTelemetry = true
-		}
 	}
 	return infra, nil
 }
 
 func runAICompanionPicker() (aiCompanionSelection, error) {
-	r, err := tui.RunPicker("AI Companion", []tui.PickerCategory{
+	var ai aiCompanionSelection
+	screens := []pickerScreen{
 		{
-			Name: "AI Companion",
+			Title: "AI Companion",
 			Items: []tui.PickerItem{
 				{Name: "Claude", Description: "CLAUDE.md project config and .claude/skills for common workflows", Selected: true},
 			},
+			Apply: map[string][]*bool{
+				"Claude": {&ai.Claude},
+			},
 		},
-	})
-	if err != nil {
+	}
+	if err := runPickerScreens(screens); err != nil {
 		return aiCompanionSelection{}, err
-	}
-	if r.Cancelled {
-		return aiCompanionSelection{}, fmt.Errorf("cancelled")
-	}
-
-	var ai aiCompanionSelection
-	for _, name := range r.Selected {
-		if name == "Claude" {
-			ai.Claude = true
-		}
 	}
 	return ai, nil
 }
@@ -669,7 +673,7 @@ func scaffoldProject(opts initOpts) (string, error) {
 				HasTenancy:        opts.features.Tenancy,
 				HasOutbox:         opts.features.EventOutbox,
 				HasRedis:          opts.infra.HasRedis,
-				HasRedisStreams:    opts.infra.HasRedisStreams,
+				HasRedisStreams:   opts.infra.HasRedisStreams,
 				HasStorageDisk:    opts.infra.HasStorageDisk,
 				HasStorageGCS:     opts.infra.HasStorageGCS,
 				HasStorageS3:      opts.infra.HasStorageS3,
@@ -779,6 +783,20 @@ func applyFeatureSelection(m *manifest.Manifest, features featureSelection) {
 	}
 }
 
+// runInitGenerate runs code generation over a freshly-scaffolded project,
+// using the framework-shipped feature specs + reflected schema. Kept quiet
+// (no verbose per-file output) so it reads as a single init step.
+// runInitGenerate runs the project's pinned generator so even init-time
+// generation matches the framework version the project just pinned — the
+// CLI's own build is never the generator.
+func runInitGenerate(target string) error {
+	gen := exec.Command("go", "tool", "gopernicus", "generate")
+	gen.Dir = target
+	gen.Stdout = os.Stdout
+	gen.Stderr = os.Stderr
+	return gen.Run()
+}
+
 // copyFeatureAssets copies migrations, core repositories, and bridge
 // repositories from the gopernicus framework source into the new project.
 // Go files have their import paths rewritten from the gopernicus module to
@@ -789,7 +807,7 @@ func copyFeatureAssets(target, modulePath, projectName, fwVersion string, featur
 		return fmt.Errorf("resolving gopernicus source: %w", err)
 	}
 
-	const gopernicusModule = "github.com/gopernicus/gopernicus"
+	const gopernicusModule = generators.FrameworkModulePath
 
 	// Copy migrations.
 	type migration struct {
@@ -805,20 +823,7 @@ func copyFeatureAssets(target, modulePath, projectName, fwVersion string, featur
 	}
 
 	for _, mig := range migrations {
-		enabled := false
-		switch mig.name {
-		case "authentication":
-			enabled = features.Authentication
-		case "authorization":
-			enabled = features.Authorization
-		case "tenancy":
-			enabled = features.Tenancy
-		case "event-outbox":
-			enabled = features.EventOutbox
-		case "job-queue":
-			enabled = features.JobQueue
-		}
-		if !enabled {
+		if !features.enabledFor(mig.name) {
 			continue
 		}
 
@@ -828,6 +833,20 @@ func copyFeatureAssets(target, modulePath, projectName, fwVersion string, featur
 		fmt.Printf("  → copying %s migration\n", mig.name)
 		if err := copyFile(src, dst); err != nil {
 			return fmt.Errorf("copying %s migration: %w", mig.name, err)
+		}
+	}
+
+	// Copy the reflected schema (_public.json) so 'gopernicus generate' can
+	// regenerate the feature repositories' tests/fixtures offline — without
+	// the user first standing up a database and running 'db reflect'.
+	for _, art := range []string{"_public.json", "_public.sql"} {
+		src := filepath.Join(source, "workshop", "migrations", "primary", art)
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		dst := filepath.Join(target, manifest.MigrationsDir("primary"), art)
+		if err := copyFile(src, dst); err != nil {
+			return fmt.Errorf("copying reflected schema %s: %w", art, err)
 		}
 	}
 
@@ -846,28 +865,19 @@ func copyFeatureAssets(target, modulePath, projectName, fwVersion string, featur
 	}
 
 	for _, d := range domains {
-		enabled := false
-		switch d.featureName {
-		case "authentication":
-			enabled = features.Authentication
-		case "authorization":
-			enabled = features.Authorization
-		case "tenancy":
-			enabled = features.Tenancy
-		case "event-outbox":
-			enabled = features.EventOutbox
-		case "job-queue":
-			enabled = features.JobQueue
-		}
-		if !enabled {
+		if !features.enabledFor(d.featureName) {
 			continue
 		}
 
-		// Copy core/repositories/{domain}/
+		// Copy core/repositories/{domain}/ — except queries.sql: feature
+		// entity specs are spec-shipped (version-locked with the framework
+		// and parsed by the generator directly). Creating a project-local
+		// queries.sql ejects an entity's shipped spec. usersstore is the
+		// framework's generator-v2 golden reference, not a project file.
 		fmt.Printf("  → copying %s core repositories\n", d.featureName)
 		coreSrc := filepath.Join(source, "core", "repositories", d.domain)
 		coreDst := filepath.Join(target, "core", "repositories", d.domain)
-		if err := copyDirRecursive(coreSrc, coreDst); err != nil {
+		if err := copyDirRecursiveSkip(coreSrc, coreDst, "queries.sql", "usersstore"); err != nil {
 			return fmt.Errorf("copying %s core repositories: %w", d.featureName, err)
 		}
 
@@ -885,37 +895,11 @@ func copyFeatureAssets(target, modulePath, projectName, fwVersion string, featur
 		}
 	}
 
-	// Copy satisfiers into their respective domain packages.
-	if features.Authentication {
-		fmt.Printf("  → copying authentication satisfiers\n")
-		satSrc := filepath.Join(source, "core", "auth", "authentication", "satisfiers")
-		satDst := filepath.Join(target, "core", "auth", "authentication", "satisfiers")
-		if err := copyDirRecursive(satSrc, satDst); err != nil {
-			return fmt.Errorf("copying authentication satisfiers: %w", err)
-		}
+	// Satisfiers are GENERATED into the project by 'gopernicus generate'
+	// (they wrap project repo types), and the hand-written auth bridges
+	// (bridge/auth/authentication, bridge/auth/invitations) are IMPORTED from
+	// the framework — neither is copied anymore.
 
-		fmt.Printf("  → copying authentication bridge\n")
-		authBridgeSrc := filepath.Join(source, "bridge", "auth", "authentication")
-		authBridgeDst := filepath.Join(target, "bridge", "auth", "authentication")
-		if err := copyDirRecursive(authBridgeSrc, authBridgeDst); err != nil {
-			return fmt.Errorf("copying authentication bridge: %w", err)
-		}
-	}
-	if features.Authorization {
-		fmt.Printf("  → copying authorization satisfiers\n")
-		satSrc := filepath.Join(source, "core", "auth", "authorization", "satisfiers")
-		satDst := filepath.Join(target, "core", "auth", "authorization", "satisfiers")
-		if err := copyDirRecursive(satSrc, satDst); err != nil {
-			return fmt.Errorf("copying authorization satisfiers: %w", err)
-		}
-
-		fmt.Printf("  → copying invitations bridge\n")
-		invBridgeSrc := filepath.Join(source, "bridge", "auth", "invitations")
-		invBridgeDst := filepath.Join(target, "bridge", "auth", "invitations")
-		if err := copyDirRecursive(invBridgeSrc, invBridgeDst); err != nil {
-			return fmt.Errorf("copying invitations bridge: %w", err)
-		}
-	}
 	// Copy AI companion files when Claude is selected.
 	if ai.Claude {
 		claudeMDSrc := filepath.Join(source, "CLAUDE.md")
@@ -958,7 +942,7 @@ func copyFeatureAssets(target, modulePath, projectName, fwVersion string, featur
 	// Rewrite import paths in all copied .go files.
 	if modulePath != gopernicusModule {
 		fmt.Printf("  → rewriting import paths\n")
-		for _, layer := range []string{"core/repositories", "core/auth/authentication/satisfiers", "core/auth/authorization/satisfiers", "bridge/repositories"} {
+		for _, layer := range []string{"core/repositories", "bridge/repositories"} {
 			dir := filepath.Join(target, layer)
 			if _, err := os.Stat(dir); err != nil {
 				continue
@@ -982,9 +966,24 @@ func gopernicusSourceDir(version string) (string, error) {
 
 // copyDirRecursive copies all files and subdirectories from src to dst.
 func copyDirRecursive(src, dst string) error {
+	return copyDirRecursiveSkip(src, dst)
+}
+
+// copyDirRecursiveSkip copies all files and subdirectories from src to dst,
+// skipping files and directories whose base name is in skipNames.
+func copyDirRecursiveSkip(src, dst string, skipNames ...string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+
+		for _, skip := range skipNames {
+			if info.Name() == skip {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
 		}
 
 		rel, err := filepath.Rel(src, path)
