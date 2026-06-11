@@ -1,20 +1,11 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 
 	"github.com/gopernicus/gopernicus/workshop/codegen/cli"
-	"github.com/gopernicus/gopernicus/workshop/codegen/fwsource"
-	"github.com/gopernicus/gopernicus/workshop/codegen/generators"
-	"github.com/gopernicus/gopernicus/workshop/codegen/goversion"
-	"github.com/gopernicus/gopernicus/workshop/codegen/manifest"
+	"github.com/gopernicus/gopernicus/workshop/codegen/initialize"
 	"github.com/gopernicus/gopernicus-cli/internal/tui"
 )
 
@@ -39,91 +30,11 @@ Examples:
 	})
 }
 
-// featureSelection tracks which framework features the user wants bootstrapped.
-type featureSelection struct {
-	Authentication bool
-	Authorization  bool
-	Tenancy        bool
-	EventOutbox    bool
-	JobQueue       bool
-}
-
-// allFeatures returns a selection with everything enabled (the default).
-func allFeatures() featureSelection {
-	return featureSelection{
-		Authentication: true,
-		Authorization:  true,
-		Tenancy:        true,
-		EventOutbox:    true, // transactional outbox for reliable event delivery
-		JobQueue:       true, // durable deferred job processing with retry
-	}
-}
-
-// noFeatures returns a selection with everything disabled.
-func noFeatures() featureSelection {
-	return featureSelection{}
-}
-
-// any returns true if at least one feature is selected.
-func (f featureSelection) any() bool {
-	return f.Authentication || f.Authorization || f.Tenancy || f.EventOutbox || f.JobQueue
-}
-
-// enabledFor reports whether the feature with the given flag name
-// ("authentication", "authorization", "tenancy", "event-outbox", "job-queue")
-// is selected.
-func (f featureSelection) enabledFor(name string) bool {
-	switch name {
-	case "authentication":
-		return f.Authentication
-	case "authorization":
-		return f.Authorization
-	case "tenancy":
-		return f.Tenancy
-	case "event-outbox":
-		return f.EventOutbox
-	case "job-queue":
-		return f.JobQueue
-	}
-	return false
-}
-
-// infrastructureSelection tracks which infrastructure adapters to bootstrap.
-type infrastructureSelection struct {
-	HasRedis        bool // Redis client (enables redis cache; required for Redis Streams)
-	HasRedisStreams bool // Redis Streams event bus backend
-	HasStorageDisk  bool // Local disk file storage
-	HasStorageGCS   bool // Google Cloud Storage
-	HasStorageS3    bool // AWS S3 / compatible
-	HasSendGrid     bool // SendGrid email delivery
-	HasTelemetry    bool // Telemetry stack (Jaeger)
-}
-
-// aiCompanionSelection tracks which AI coding assistant to bootstrap.
-type aiCompanionSelection struct {
-	Claude bool // CLAUDE.md + .claude/skills/
-}
-
-// defaultAICompanion returns the default AI companion selection.
-func defaultAICompanion() aiCompanionSelection {
-	return aiCompanionSelection{Claude: true}
-}
-
-// defaultInfrastructure returns the default infrastructure selection.
-// Redis + disk + GCS + SendGrid are on by default (matching the docker-compose setup).
-func defaultInfrastructure() infrastructureSelection {
-	return infrastructureSelection{
-		HasRedis:        true,
-		HasRedisStreams: true,
-		HasStorageDisk:  true,
-		HasStorageGCS:   true,
-		HasSendGrid:     true,
-		HasTelemetry:    true,
-	}
-}
-
+// runInit resolves init options — interactively via the TUI pickers when a
+// terminal is attached, plainly otherwise — and hands them to the framework's
+// init engine, which does the scaffolding and orchestration.
 func runInit(_ context.Context, args []string) error {
-	opts, err := parseInitArgs(args)
+	opts, err := initialize.ParseArgs(args)
 	if err != nil {
 		return err
 	}
@@ -132,202 +43,36 @@ func runInit(_ context.Context, args []string) error {
 		return err
 	}
 
-	target, err := scaffoldProject(opts)
-	if err != nil {
-		return err
-	}
-
-	// Copy feature assets (migrations, repos, bridges) from gopernicus source.
-	if opts.features.any() {
-		if err := copyFeatureAssets(target, opts.modulePath, opts.projectName, opts.frameworkVersion, opts.features, opts.ai); err != nil {
-			return err
-		}
-	}
-
-	// Add gopernicus as a dependency.
-	if devSource := os.Getenv("GOPERNICUS_DEV_SOURCE"); devSource != "" {
-		// Dev mode: replace directive pointing to local gopernicus source.
-		fmt.Printf("  → linking local gopernicus (%s)\n", devSource)
-		replace := exec.Command("go", "mod", "edit",
-			"-replace=github.com/gopernicus/gopernicus="+devSource,
-		)
-		replace.Dir = target
-		replace.Stdout = os.Stdout
-		replace.Stderr = os.Stderr
-		if err := replace.Run(); err != nil {
-			return fmt.Errorf("go mod edit -replace: %w", err)
-		}
-	} else {
-		fwRef := "github.com/gopernicus/gopernicus@latest"
-		if opts.frameworkVersion != "" {
-			fwRef = "github.com/gopernicus/gopernicus@" + opts.frameworkVersion
-		}
-		fmt.Printf("  → adding gopernicus framework\n")
-		goGet := exec.Command("go", "get", fwRef)
-		goGet.Dir = target
-		goGet.Stdout = os.Stdout
-		goGet.Stderr = os.Stderr
-		if err := goGet.Run(); err != nil {
-			fmt.Printf("  warning: go get failed: %v\n", err)
-		}
-	}
-
-	// Pin the in-framework generator tool: `go tool gopernicus` then runs the
-	// exact generator that ships with the framework version the project links,
-	// so emitted code and runtime can never drift.
-	fmt.Printf("  → pinning the gopernicus tool\n")
-	toolEdit := exec.Command("go", "mod", "edit",
-		"-tool=github.com/gopernicus/gopernicus/workshop/gopernicus",
-	)
-	toolEdit.Dir = target
-	toolEdit.Stdout = os.Stdout
-	toolEdit.Stderr = os.Stderr
-	if err := toolEdit.Run(); err != nil {
-		return fmt.Errorf("go mod edit -tool: %w", err)
-	}
-
-	// Run go mod tidy to resolve the framework dependency and sums. The
-	// scaffolded server wiring imports satisfier packages that are emitted by
-	// the generate step below, so unresolvable project-internal imports are
-	// tolerated here (-e); the post-generation tidy below settles the module
-	// files once those packages exist.
-	fmt.Printf("  → running go mod tidy\n")
-	tidy := exec.Command("go", "mod", "tidy", "-e")
-	tidy.Dir = target
-	tidy.Stdout = os.Stdout
-	tidy.Stderr = os.Stderr
-	if err := tidy.Run(); err != nil {
-		fmt.Printf("  warning: go mod tidy failed: %v\n", err)
-	}
-
-	// Generate the feature repositories' code, tests, fixtures, and feature
-	// satisfiers from the framework-shipped specs + reflected schema, so the
-	// project is complete out of the box. Best-effort: a failure here leaves
-	// a valid scaffold the user can regenerate manually, so it must not fail
-	// init.
-	if opts.features.any() {
-		fmt.Printf("  → generating repositories\n")
-		if err := runInitGenerate(target); err != nil {
-			fmt.Printf("  warning: generation skipped (%v)\n", err)
-			fmt.Printf("           run 'gopernicus generate' after 'db reflect' to populate tests/fixtures\n")
-		}
-
-		// Final tidy now that generation has emitted the satisfier packages
-		// the server wiring imports.
-		finalTidy := exec.Command("go", "mod", "tidy")
-		finalTidy.Dir = target
-		finalTidy.Stdout = os.Stdout
-		finalTidy.Stderr = os.Stderr
-		if err := finalTidy.Run(); err != nil {
-			fmt.Printf("  warning: go mod tidy failed: %v\n", err)
-		}
-	}
-
-	fmt.Println()
-	fmt.Printf("  ✓ created %s\n\n", opts.projectName)
-	fmt.Printf("  cd %s\n", opts.projectName)
-	fmt.Printf("  gopernicus doctor   # check project health\n")
-	fmt.Println()
-
-	return nil
+	return initialize.Run(opts)
 }
 
-// initOpts holds all inputs for the init command.
-type initOpts struct {
-	projectName      string
-	orgHint          string // extracted from "org/name" format (e.g. "jrazmi" from "jrazmi/foo")
-	modulePath       string
-	frameworkVersion string // gopernicus framework version (e.g. "v0.1.0"); "" means latest
-	noInteractive    bool
-	featuresFlag     string // raw --features value; "" means use default (all)
-	features         featureSelection
-	infra            infrastructureSelection
-	ai               aiCompanionSelection
-}
-
-func parseInitArgs(args []string) (initOpts, error) {
-	var opts initOpts
-	for i := 0; i < len(args); i++ {
-		switch {
-		case args[i] == "--module" || args[i] == "-m":
-			if i+1 >= len(args) {
-				return opts, fmt.Errorf("--module requires a value")
-			}
-			i++
-			opts.modulePath = args[i]
-		case args[i] == "--no-interactive":
-			opts.noInteractive = true
-		case strings.HasPrefix(args[i], "--features="):
-			opts.featuresFlag = strings.TrimPrefix(args[i], "--features=")
-		case args[i] == "--features":
-			if i+1 >= len(args) {
-				return opts, fmt.Errorf("--features requires a value")
-			}
-			i++
-			opts.featuresFlag = args[i]
-		case strings.HasPrefix(args[i], "--framework-version="):
-			opts.frameworkVersion = strings.TrimPrefix(args[i], "--framework-version=")
-		case args[i] == "--framework-version":
-			if i+1 >= len(args) {
-				return opts, fmt.Errorf("--framework-version requires a value")
-			}
-			i++
-			opts.frameworkVersion = args[i]
-		case strings.HasPrefix(args[i], "--"):
-			return opts, fmt.Errorf("unknown flag %q", args[i])
-		default:
-			if opts.projectName == "" {
-				raw := args[i]
-				// "org/repo" or "github.com/org/repo" → extract repo name and infer module path.
-				if idx := strings.LastIndex(raw, "/"); idx >= 0 {
-					opts.orgHint = raw[:idx]
-					opts.projectName = raw[idx+1:]
-				} else {
-					opts.projectName = raw
-				}
-			}
-		}
-	}
-	return opts, nil
-}
-
-func resolveInitOpts(opts *initOpts) error {
-	interactive := !opts.noInteractive && tui.IsInteractive()
+func resolveInitOpts(opts *initialize.Options) error {
+	interactive := !opts.NoInteractive && tui.IsInteractive()
 
 	if interactive {
 		return resolveInitOptsInteractive(opts)
 	}
-	return resolveInitOptsPlain(opts)
+	return initialize.ResolveDefaults(opts)
 }
 
-func resolveInitOptsInteractive(opts *initOpts) error {
-	defaultModule := ""
-	switch {
-	case opts.modulePath != "":
-		defaultModule = opts.modulePath
-	case opts.orgHint != "" && opts.projectName != "":
-		// Infer github.com/<org>/<repo> from "org/repo" shorthand.
-		if strings.Contains(opts.orgHint, ".") {
-			defaultModule = opts.orgHint + "/" + opts.projectName
-		} else {
-			defaultModule = "github.com/" + opts.orgHint + "/" + opts.projectName
-		}
-	case opts.projectName != "":
-		defaultModule = "github.com/your-org/" + opts.projectName
+func resolveInitOptsInteractive(opts *initialize.Options) error {
+	defaultModule := opts.ModulePath
+	if defaultModule == "" {
+		defaultModule = initialize.DefaultModulePath(opts.OrgHint, opts.ProjectName)
 	}
 
 	fields := []tui.WizardField{
 		{
 			Label:       "Project name",
 			Placeholder: "myapp",
-			Default:     opts.projectName,
-			Validate:    validateProjectName,
+			Default:     opts.ProjectName,
+			Validate:    initialize.ValidateProjectName,
 		},
 		{
 			Label:       "Go module path",
 			Placeholder: "github.com/your-org/myapp",
 			Default:     defaultModule,
-			Validate:    validateModulePath,
+			Validate:    initialize.ValidateModulePath,
 		},
 	}
 
@@ -339,22 +84,22 @@ func resolveInitOptsInteractive(opts *initOpts) error {
 		return fmt.Errorf("cancelled")
 	}
 
-	opts.projectName = result.Values[0]
-	opts.modulePath = result.Values[1]
+	opts.ProjectName = result.Values[0]
+	opts.ModulePath = result.Values[1]
 
 	// Feature picker — skip if --features was provided on CLI.
-	if opts.featuresFlag != "" {
-		features, err := parseFeaturesFlag(opts.featuresFlag)
+	if opts.FeaturesFlag != "" {
+		features, err := initialize.ParseFeaturesFlag(opts.FeaturesFlag)
 		if err != nil {
 			return err
 		}
-		opts.features = features
+		opts.Features = features
 	} else {
 		features, err := runFeaturePicker()
 		if err != nil {
 			return err
 		}
-		opts.features = features
+		opts.Features = features
 	}
 
 	// Infrastructure picker — always shown interactively.
@@ -362,86 +107,16 @@ func resolveInitOptsInteractive(opts *initOpts) error {
 	if err != nil {
 		return err
 	}
-	opts.infra = infra
+	opts.Infra = infra
 
 	// AI companion picker — always shown interactively.
 	ai, err := runAICompanionPicker()
 	if err != nil {
 		return err
 	}
-	opts.ai = ai
+	opts.AI = ai
 
 	return nil
-}
-
-func resolveInitOptsPlain(opts *initOpts) error {
-	if opts.projectName == "" {
-		return fmt.Errorf("project name required\n\nUsage: gopernicus init <project-name>")
-	}
-	if err := validateProjectName(opts.projectName); err != nil {
-		return err
-	}
-	if opts.modulePath == "" {
-		if opts.orgHint != "" {
-			if strings.Contains(opts.orgHint, ".") {
-				opts.modulePath = opts.orgHint + "/" + opts.projectName
-			} else {
-				opts.modulePath = "github.com/" + opts.orgHint + "/" + opts.projectName
-			}
-		} else {
-			opts.modulePath = "github.com/your-org/" + opts.projectName
-			fmt.Printf("note: using module path %q — edit go.mod to change it\n", opts.modulePath)
-		}
-	}
-
-	// Default: all features enabled unless --features flag was provided.
-	if opts.featuresFlag != "" {
-		features, err := parseFeaturesFlag(opts.featuresFlag)
-		if err != nil {
-			return err
-		}
-		opts.features = features
-	} else {
-		opts.features = allFeatures()
-	}
-
-	// Use defaults for infrastructure and AI companion in non-interactive mode.
-	opts.infra = defaultInfrastructure()
-	opts.ai = defaultAICompanion()
-
-	return nil
-}
-
-// parseFeaturesFlag parses the --features flag value.
-// Accepts: "none", "authentication", "authorization", "tenancy", "event-outbox", "job-queue", or comma-separated.
-func parseFeaturesFlag(value string) (featureSelection, error) {
-	value = strings.TrimSpace(strings.ToLower(value))
-	if value == "none" {
-		return noFeatures(), nil
-	}
-	if value == "all" || value == "" {
-		return allFeatures(), nil
-	}
-
-	features := noFeatures()
-	for _, name := range strings.Split(value, ",") {
-		name = strings.TrimSpace(name)
-		switch name {
-		case "authentication":
-			features.Authentication = true
-		case "authorization":
-			features.Authorization = true
-		case "tenancy":
-			features.Tenancy = true
-		case "event-outbox":
-			features.EventOutbox = true
-		case "job-queue":
-			features.JobQueue = true
-		default:
-			return features, fmt.Errorf("unknown feature %q (valid: authentication, authorization, tenancy, event-outbox, job-queue, none, all)", name)
-		}
-	}
-	return features, nil
 }
 
 // pickerScreen is one interactive multi-select screen: a title (also the
@@ -477,8 +152,8 @@ func runPickerScreens(screens []pickerScreen) error {
 
 // runFeaturePicker shows per-screen interactive multi-selects for framework features.
 // Each category gets its own TUI screen.
-func runFeaturePicker() (featureSelection, error) {
-	features := noFeatures()
+func runFeaturePicker() (initialize.FeatureSelection, error) {
+	features := initialize.NoFeatures()
 	screens := []pickerScreen{
 		{
 			Title: "Framework Features",
@@ -506,15 +181,15 @@ func runFeaturePicker() (featureSelection, error) {
 		},
 	}
 	if err := runPickerScreens(screens); err != nil {
-		return noFeatures(), err
+		return initialize.NoFeatures(), err
 	}
 	return features, nil
 }
 
 // runInfraPicker shows per-screen interactive multi-selects for infrastructure adapters.
 // Each category gets its own TUI screen.
-func runInfraPicker() (infrastructureSelection, error) {
-	infra := infrastructureSelection{}
+func runInfraPicker() (initialize.InfrastructureSelection, error) {
+	infra := initialize.InfrastructureSelection{}
 	screens := []pickerScreen{
 		{
 			Title: "Cache Backend",
@@ -568,13 +243,13 @@ func runInfraPicker() (infrastructureSelection, error) {
 		},
 	}
 	if err := runPickerScreens(screens); err != nil {
-		return defaultInfrastructure(), err
+		return initialize.DefaultInfrastructure(), err
 	}
 	return infra, nil
 }
 
-func runAICompanionPicker() (aiCompanionSelection, error) {
-	var ai aiCompanionSelection
+func runAICompanionPicker() (initialize.AICompanionSelection, error) {
+	var ai initialize.AICompanionSelection
 	screens := []pickerScreen{
 		{
 			Title: "AI Companion",
@@ -587,582 +262,7 @@ func runAICompanionPicker() (aiCompanionSelection, error) {
 		},
 	}
 	if err := runPickerScreens(screens); err != nil {
-		return aiCompanionSelection{}, err
+		return initialize.AICompanionSelection{}, err
 	}
 	return ai, nil
 }
-
-func scaffoldProject(opts initOpts) (string, error) {
-	target, err := filepath.Abs(opts.projectName)
-	if err != nil {
-		return "", err
-	}
-
-	// Refuse to overwrite an existing directory that has content.
-	if entries, err := os.ReadDir(target); err == nil && len(entries) > 0 {
-		return "", fmt.Errorf("directory %q already exists and is not empty", opts.projectName)
-	}
-
-	// Build the manifest with features and domain mappings.
-	m := manifest.NewWithProject(opts.projectName)
-	if opts.frameworkVersion != "" {
-		m.GopernicusVersion = opts.frameworkVersion
-	}
-	applyFeatureSelection(m, opts.features)
-
-	steps := []struct {
-		desc string
-		fn   func() error
-	}{
-		{"creating project directory", func() error {
-			return os.MkdirAll(target, 0755)
-		}},
-		{"initializing go module", func() error {
-			cmd := exec.Command("go", "mod", "init", opts.modulePath)
-			cmd.Dir = target
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
-				return err
-			}
-			// Pin to the minimum supported Go version so all projects are consistent.
-			pin := exec.Command("go", "mod", "edit", "-go="+goversion.MinGoVersion)
-			pin.Dir = target
-			return pin.Run()
-		}},
-		{"creating directory layout", func() error {
-			dirs := []string{
-				manifest.MigrationsDir("primary"),
-				"core/repositories",
-				"core/cases",
-				"core/auth",
-				"bridge/repositories",
-				"bridge/cases",
-				"bridge/transit",
-				"infrastructure",
-				"sdk",
-				"workshop/dev",
-				"workshop/testing/fixtures",
-				"workshop/testing/e2e",
-			}
-			for _, d := range dirs {
-				if err := os.MkdirAll(filepath.Join(target, d), 0755); err != nil {
-					return err
-				}
-			}
-			return nil
-		}},
-		{"writing gopernicus.yml", func() error {
-			return manifest.Save(target, m)
-		}},
-		{"writing .gitignore", func() error {
-			return os.WriteFile(
-				filepath.Join(target, ".gitignore"),
-				[]byte(defaultGitignore),
-				0644,
-			)
-		}},
-		{"scaffolding app server", func() error {
-			hasStorage := opts.infra.HasStorageDisk || opts.infra.HasStorageGCS || opts.infra.HasStorageS3
-			return generators.GenerateAppScaffold(target, generators.AppScaffoldData{
-				ProjectName:       opts.projectName,
-				ModulePath:        opts.modulePath,
-				AppNameUpper:      generators.AppNameFromProject(opts.projectName),
-				HasAuthentication: opts.features.Authentication,
-				HasAuthorization:  opts.features.Authorization,
-				HasTenancy:        opts.features.Tenancy,
-				HasOutbox:         opts.features.EventOutbox,
-				HasRedis:          opts.infra.HasRedis,
-				HasRedisStreams:   opts.infra.HasRedisStreams,
-				HasStorageDisk:    opts.infra.HasStorageDisk,
-				HasStorageGCS:     opts.infra.HasStorageGCS,
-				HasStorageS3:      opts.infra.HasStorageS3,
-				HasSendGrid:       opts.infra.HasSendGrid,
-				HasTelemetry:      opts.infra.HasTelemetry,
-				HasStorage:        hasStorage,
-			})
-		}},
-	}
-
-	fmt.Println()
-	for _, step := range steps {
-		fmt.Printf("  → %s\n", step.desc)
-		if err := step.fn(); err != nil {
-			return "", fmt.Errorf("%s: %w", step.desc, err)
-		}
-	}
-
-	return target, nil
-}
-
-// applyFeatureSelection configures the manifest based on selected features.
-func applyFeatureSelection(m *manifest.Manifest, features featureSelection) {
-	if m.Features == nil {
-		m.Features = &manifest.FeaturesConfig{}
-	}
-
-	if features.Authentication {
-		m.Features.Authentication = manifest.FeatureGopernicus
-	} else {
-		m.Features.Authentication = ""
-	}
-
-	if features.Authorization {
-		m.Features.Authorization = manifest.FeatureGopernicus
-	} else {
-		m.Features.Authorization = ""
-	}
-
-	if features.Tenancy {
-		m.Features.Tenancy = manifest.FeatureGopernicus
-	} else {
-		m.Features.Tenancy = ""
-	}
-
-	if features.EventOutbox || features.JobQueue {
-		if m.Events == nil {
-			m.Events = &manifest.EventsConfig{}
-		}
-		if features.EventOutbox {
-			m.Events.Outbox = manifest.FeatureGopernicus
-		}
-		if features.JobQueue {
-			m.Events.JobQueue = manifest.FeatureGopernicus
-		}
-	}
-
-	// Set domain mappings for selected features.
-	db := m.DatabaseOrDefault("")
-	if db == nil {
-		return
-	}
-	if db.Domains == nil {
-		db.Domains = make(map[string][]string)
-	}
-
-	if features.Authentication {
-		db.Domains["auth"] = []string{
-			"api_keys",
-			"oauth_accounts",
-			"principals",
-			"security_events",
-			"service_accounts",
-			"sessions",
-			"user_passwords",
-			"users",
-			"verification_codes",
-			"verification_tokens",
-		}
-	}
-
-	if features.Authorization {
-		db.Domains["rebac"] = []string{
-			"groups",
-			"invitations",
-			"rebac_relationships",
-			"rebac_relationship_metadata",
-		}
-	}
-
-	if features.Tenancy {
-		db.Domains["tenancy"] = []string{
-			"tenants",
-		}
-	}
-
-	if features.EventOutbox {
-		db.Domains["events"] = []string{
-			"event_outbox",
-		}
-	}
-
-	if features.JobQueue {
-		db.Domains["jobs"] = []string{
-			"job_queue",
-		}
-	}
-}
-
-// runInitGenerate runs code generation over a freshly-scaffolded project,
-// using the framework-shipped feature specs + reflected schema. Kept quiet
-// (no verbose per-file output) so it reads as a single init step.
-// runInitGenerate runs the project's pinned generator so even init-time
-// generation matches the framework version the project just pinned — the
-// CLI's own build is never the generator.
-func runInitGenerate(target string) error {
-	gen := exec.Command("go", "tool", "gopernicus", "generate")
-	gen.Dir = target
-	gen.Stdout = os.Stdout
-	gen.Stderr = os.Stderr
-	return gen.Run()
-}
-
-// copyFeatureAssets copies migrations, core repositories, and bridge
-// repositories from the gopernicus framework source into the new project.
-// Go files have their import paths rewritten from the gopernicus module to
-// the user's module path.
-func copyFeatureAssets(target, modulePath, projectName, fwVersion string, features featureSelection, ai aiCompanionSelection) error {
-	source, err := gopernicusSourceDir(fwVersion)
-	if err != nil {
-		return fmt.Errorf("resolving gopernicus source: %w", err)
-	}
-
-	const gopernicusModule = generators.FrameworkModulePath
-
-	// Copy migrations.
-	type migration struct {
-		name string
-		file string
-	}
-	migrations := []migration{
-		{"authentication", "0001_auth.sql"},
-		{"authorization", "0002_rebac.sql"},
-		{"tenancy", "0003_tenants.sql"},
-		{"event-outbox", "0004_event_outbox.sql"},
-		{"job-queue", "0005_job_queue.sql"},
-	}
-
-	for _, mig := range migrations {
-		if !features.enabledFor(mig.name) {
-			continue
-		}
-
-		src := filepath.Join(source, "workshop", "migrations", "primary", mig.file)
-		dst := filepath.Join(target, manifest.MigrationsDir("primary"), mig.file)
-
-		fmt.Printf("  → copying %s migration\n", mig.name)
-		if err := copyFile(src, dst); err != nil {
-			return fmt.Errorf("copying %s migration: %w", mig.name, err)
-		}
-	}
-
-	// Copy the reflected schema (_public.json) so 'gopernicus generate' can
-	// regenerate the feature repositories' tests/fixtures offline — without
-	// the user first standing up a database and running 'db reflect'.
-	for _, art := range []string{"_public.json", "_public.sql"} {
-		src := filepath.Join(source, "workshop", "migrations", "primary", art)
-		if _, err := os.Stat(src); err != nil {
-			continue
-		}
-		dst := filepath.Join(target, manifest.MigrationsDir("primary"), art)
-		if err := copyFile(src, dst); err != nil {
-			return fmt.Errorf("copying reflected schema %s: %w", art, err)
-		}
-	}
-
-	// Copy core repositories and bridge repositories.
-	type domainSource struct {
-		featureName string
-		domain      string // directory name under core/repositories/
-		bridgeDir   string // directory name under bridge/repositories/
-	}
-	domains := []domainSource{
-		{"authentication", "auth", "authreposbridge"},
-		{"authorization", "rebac", "rebacreposbridge"},
-		{"tenancy", "tenancy", "tenancyreposbridge"},
-		{"event-outbox", "events", ""},
-		{"job-queue", "jobs", ""},
-	}
-
-	for _, d := range domains {
-		if !features.enabledFor(d.featureName) {
-			continue
-		}
-
-		// Copy core/repositories/{domain}/ — except queries.sql: feature
-		// entity specs are spec-shipped (version-locked with the framework
-		// and parsed by the generator directly). Creating a project-local
-		// queries.sql ejects an entity's shipped spec. usersstore is the
-		// framework's generator-v2 golden reference, not a project file.
-		fmt.Printf("  → copying %s core repositories\n", d.featureName)
-		coreSrc := filepath.Join(source, "core", "repositories", d.domain)
-		coreDst := filepath.Join(target, "core", "repositories", d.domain)
-		if err := copyDirRecursiveSkip(coreSrc, coreDst, "queries.sql", "usersstore"); err != nil {
-			return fmt.Errorf("copying %s core repositories: %w", d.featureName, err)
-		}
-
-		// Copy bridge/repositories/{domain}reposbridge/
-		if d.bridgeDir == "" {
-			continue
-		}
-		bridgeSrc := filepath.Join(source, "bridge", "repositories", d.bridgeDir)
-		if _, err := os.Stat(bridgeSrc); err == nil {
-			fmt.Printf("  → copying %s bridge repositories\n", d.featureName)
-			bridgeDst := filepath.Join(target, "bridge", "repositories", d.bridgeDir)
-			if err := copyDirRecursive(bridgeSrc, bridgeDst); err != nil {
-				return fmt.Errorf("copying %s bridge repositories: %w", d.featureName, err)
-			}
-		}
-	}
-
-	// Satisfiers are GENERATED into the project by 'gopernicus generate'
-	// (they wrap project repo types), and the hand-written auth bridges
-	// (bridge/auth/authentication, bridge/auth/invitations) are IMPORTED from
-	// the framework — neither is copied anymore.
-
-	// Copy AI companion files when Claude is selected.
-	if ai.Claude {
-		claudeMDSrc := filepath.Join(source, "CLAUDE.md")
-		if _, err := os.Stat(claudeMDSrc); err == nil {
-			fmt.Printf("  → copying CLAUDE.md\n")
-			data, err := os.ReadFile(claudeMDSrc)
-			if err != nil {
-				return fmt.Errorf("reading CLAUDE.md: %w", err)
-			}
-			// Replace the placeholder with the actual project name.
-			content := strings.ReplaceAll(string(data), "__PROJECT_NAME__", projectName)
-			dst := filepath.Join(target, "CLAUDE.md")
-			if err := os.WriteFile(dst, []byte(content), 0644); err != nil {
-				return fmt.Errorf("writing CLAUDE.md: %w", err)
-			}
-		}
-
-		skillsSrc := filepath.Join(source, ".claude", "skills")
-		if _, err := os.Stat(skillsSrc); err == nil {
-			fmt.Printf("  → copying Claude skills\n")
-			skillsDst := filepath.Join(target, ".claude", "skills")
-			if err := copyDirRecursive(skillsSrc, skillsDst); err != nil {
-				return fmt.Errorf("copying Claude skills: %w", err)
-			}
-		}
-	}
-
-	// Copy framework documentation into the scaffolded project.
-	// Markdown files have YAML frontmatter stripped so they read cleanly
-	// outside the Docusaurus context.
-	docsSrc := filepath.Join(source, "workshop", "documentation", "docs")
-	if _, err := os.Stat(docsSrc); err == nil {
-		fmt.Printf("  → copying gopernicus documentation\n")
-		docsDst := filepath.Join(target, "workshop", "documentation", "gopernicus")
-		if err := copyDirStripFrontmatter(docsSrc, docsDst); err != nil {
-			return fmt.Errorf("copying documentation: %w", err)
-		}
-	}
-
-	// Rewrite import paths in all copied .go files.
-	if modulePath != gopernicusModule {
-		fmt.Printf("  → rewriting import paths\n")
-		for _, layer := range []string{"core/repositories", "bridge/repositories"} {
-			dir := filepath.Join(target, layer)
-			if _, err := os.Stat(dir); err != nil {
-				continue
-			}
-			if err := rewriteImports(dir, gopernicusModule, modulePath); err != nil {
-				return fmt.Errorf("rewriting imports in %s: %w", layer, err)
-			}
-		}
-	}
-
-	return nil
-}
-
-// gopernicusSourceDir returns the path to the gopernicus framework source.
-// Uses GOPERNICUS_DEV_SOURCE if set, otherwise resolves from the Go module
-// cache via `go mod download -json`. When version is non-empty it fetches
-// that specific version; otherwise it fetches @latest.
-func gopernicusSourceDir(version string) (string, error) {
-	return fwsource.ResolveDirVersion(version)
-}
-
-// copyDirRecursive copies all files and subdirectories from src to dst.
-func copyDirRecursive(src, dst string) error {
-	return copyDirRecursiveSkip(src, dst)
-}
-
-// copyDirRecursiveSkip copies all files and subdirectories from src to dst,
-// skipping files and directories whose base name is in skipNames.
-func copyDirRecursiveSkip(src, dst string, skipNames ...string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		for _, skip := range skipNames {
-			if info.Name() == skip {
-				if info.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-		}
-
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-
-		if info.IsDir() {
-			return os.MkdirAll(target, 0755)
-		}
-
-		return copyFile(path, target)
-	})
-}
-
-// copyDirStripFrontmatter copies all files and subdirectories from src to dst.
-// For .md files, YAML frontmatter (delimited by --- lines) is stripped so the
-// files read cleanly outside a Docusaurus context.
-func copyDirStripFrontmatter(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-
-		if info.IsDir() {
-			return os.MkdirAll(target, 0755)
-		}
-
-		if strings.HasSuffix(info.Name(), ".md") {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			data = stripFrontmatter(data)
-			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-				return err
-			}
-			return os.WriteFile(target, data, 0644)
-		}
-
-		return copyFile(path, target)
-	})
-}
-
-// stripFrontmatter removes YAML frontmatter delimited by --- lines from the
-// start of a markdown file. Leading blank lines after removal are also trimmed.
-func stripFrontmatter(data []byte) []byte {
-	if !bytes.HasPrefix(data, []byte("---")) {
-		return data
-	}
-	// Find the closing --- after the opening one.
-	rest := data[3:]
-	idx := bytes.Index(rest, []byte("\n---"))
-	if idx == -1 {
-		return data
-	}
-	// Skip past the closing --- and its newline.
-	stripped := rest[idx+4:]
-	return bytes.TrimLeft(stripped, "\n")
-}
-
-// rewriteImports replaces oldModule with newModule in all .go files under dir.
-// Only rewrites imports for core/repositories and bridge/repositories paths —
-// framework SDK/infrastructure imports are left pointing at gopernicus.
-func rewriteImports(dir, oldModule, newModule string) error {
-	oldCore := oldModule + "/core/repositories/"
-	newCore := newModule + "/core/repositories/"
-	oldAuthSatisfiers := oldModule + "/core/auth/authentication/satisfiers"
-	newAuthSatisfiers := newModule + "/core/auth/authentication/satisfiers"
-	oldAuthzSatisfiers := oldModule + "/core/auth/authorization/satisfiers"
-	newAuthzSatisfiers := newModule + "/core/auth/authorization/satisfiers"
-	oldBridge := oldModule + "/bridge/repositories/"
-	newBridge := newModule + "/bridge/repositories/"
-
-	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() || !strings.HasSuffix(path, ".go") {
-			return nil
-		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-
-		content := string(data)
-		updated := strings.ReplaceAll(content, oldCore, newCore)
-		updated = strings.ReplaceAll(updated, oldAuthSatisfiers, newAuthSatisfiers)
-		updated = strings.ReplaceAll(updated, oldAuthzSatisfiers, newAuthzSatisfiers)
-		updated = strings.ReplaceAll(updated, oldBridge, newBridge)
-
-		if updated != content {
-			return os.WriteFile(path, []byte(updated), info.Mode())
-		}
-		return nil
-	})
-}
-
-// copyFile copies a single file from src to dst.
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-		return err
-	}
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	return out.Close()
-}
-
-func validateProjectName(s string) error {
-	if s == "" {
-		return fmt.Errorf("required")
-	}
-	for _, c := range s {
-		if !isAlphaNumDash(c) {
-			return fmt.Errorf("only letters, numbers, and hyphens allowed")
-		}
-	}
-	return nil
-}
-
-func validateModulePath(s string) error {
-	if s == "" {
-		return fmt.Errorf("required")
-	}
-	if strings.Contains(s, " ") {
-		return fmt.Errorf("module path cannot contain spaces")
-	}
-	return nil
-}
-
-func isAlphaNumDash(c rune) bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-		(c >= '0' && c <= '9') || c == '-' || c == '_'
-}
-
-const defaultGitignore = `# Binaries
-*.exe
-*.dll
-*.so
-*.dylib
-
-# Go
-*.test
-*.out
-/vendor/
-
-# Environment
-.env
-.env.*
-!.env.example
-
-# Dev infrastructure data
-workshop/dev/data/
-
-# Editor
-.DS_Store
-.idea/
-.vscode/
-`
